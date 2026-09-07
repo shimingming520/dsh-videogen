@@ -6,6 +6,7 @@
  */
 
 import { mkdir, readFile, writeFile, unlink, rename } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 import os from 'node:os'
@@ -107,6 +108,32 @@ function mimeFromFile(file: string): string {
     case '.png': return 'image/png'
     default: return 'application/octet-stream'
   }
+}
+
+/** Server-side resolve of a same-origin asset URL to a local file path. */
+const ASSET_PREFIX = '/api/dsh-videogen/assets/'
+
+export function resolveAssetPath(url: string): string | undefined {
+  if (!url.startsWith(ASSET_PREFIX)) return undefined
+  const rest = url.slice(ASSET_PREFIX.length)
+  const parts = rest.split('/')
+  if (parts.length !== 2 || parts[0] === undefined || parts[1] === undefined) return undefined
+  const kind = parts[0]
+  const file = parts[1]
+  const dir = kind === 'videos' ? VIDEO_AUDIO_DIR : kind === 'output' ? PROCESS_OUTPUT_DIR : kind === 'library' ? LIBRARY_DATA_DIR : undefined
+  if (dir === undefined) return undefined
+  const full = path.join(dir, safeName(file))
+  return existsSync(full) ? full : undefined
+}
+
+/** Persist an uploaded browser file (base64 body) under the output dir. */
+export async function saveUpload(data: Uint8Array, name: string): Promise<SavedOutput> {
+  await ensureDir(PROCESS_OUTPUT_DIR)
+  const ext = path.extname(name).replace(/[^a-zA-Z0-9]/g, '').toLowerCase() || 'bin'
+  const id = randomUUID()
+  const file = `upload_${id}.${ext}`
+  await writeFile(path.join(PROCESS_OUTPUT_DIR, file), data)
+  return { file, mime: mimeFromFile(file), bytes: data.byteLength }
 }
 
 /* ------------------------------------------------------------------ */

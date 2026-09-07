@@ -6,7 +6,7 @@ import { existsSync } from 'node:fs'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
 import { runProcessAction, ProcessError } from './process-engine.ts'
-import { PROCESS_OUTPUT_DIR, readDataFile } from './video-store.ts'
+import { PROCESS_OUTPUT_DIR, readDataFile, saveUpload, resolveAssetPath } from './video-store.ts'
 import { writeJson, readJsonBody, methodGuard } from './routes-util.ts'
 import { ASSETS_API, PROCESS_API } from './protocol.ts'
 
@@ -20,6 +20,11 @@ const WS_PREFIX = 'ws:'
 
 async function resolveInput(value: string, resolveWorkspacePath: ProcessRouteDeps['resolveWorkspacePath']): Promise<string> {
   const trimmed = value.trim()
+  if (trimmed.startsWith('/api/dsh-videogen/assets/')) {
+    const local = resolveAssetPath(trimmed)
+    if (local === undefined) throw new ProcessError('同源资源不存在或已清理，请重新上传/选择', 'bad-input')
+    return local
+  }
   if (/^https?:\/\//i.test(trimmed)) return trimmed
   if (trimmed.startsWith(WS_PREFIX)) {
     const rest = trimmed.slice(WS_PREFIX.length)
@@ -89,6 +94,34 @@ export function processRoutes(deps: ProcessRouteDeps): WebRoute[] {
         } catch (error) {
           writeJson(res, error instanceof ProcessError ? 500 : 500, { ok: false, code: error instanceof ProcessError ? error.code : 'video-process-failed', message: error instanceof Error ? error.message : String(error) })
         }
+      },
+    },
+    {
+      kind: 'exact',
+      path: '/api/dsh-videogen/upload',
+      handler: async (req: IncomingMessage, res: ServerResponse) => {
+        if (!methodGuard(req, res, 'POST')) return
+        const body = await readJsonBody(req, 768 * 1024 * 1024)
+        const name = typeof body?.name === 'string' ? body.name.trim() : ''
+        const data = typeof body?.data === 'string' && body.data !== '' ? body.data : ''
+        if (name === '' || data === '') {
+          writeJson(res, 400, { ok: false, code: 'bad-upload', message: '缺少文件数据' })
+          return
+        }
+        let bytes: Buffer
+        try {
+          const bare = data.replace(/^data:[^;]+;base64,/, '')
+          bytes = Buffer.from(bare, 'base64')
+        } catch {
+          writeJson(res, 400, { ok: false, code: 'bad-upload', message: '文件数据不是合法 base64' })
+          return
+        }
+        if (bytes.byteLength === 0 || bytes.byteLength > 768 * 1024 * 1024) {
+          writeJson(res, 400, { ok: false, code: 'bad-upload', message: '文件过大（上限 768MB）' })
+          return
+        }
+        const saved = await saveUpload(bytes, name)
+        writeJson(res, 200, { ok: true, file: saved.file, name, mime: saved.mime, bytes: saved.bytes, url: `${ASSETS_API}/output/${encodeURIComponent(saved.file)}` })
       },
     },
     {

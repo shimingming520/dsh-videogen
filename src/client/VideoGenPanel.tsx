@@ -8,7 +8,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { VideogenApi } from './api.ts'
 import type { VideogenScope, VideogenScopeSnapshot } from './settings-scope.ts'
 import { tt, errorMessage } from './helpers.ts'
-import type { GenerateResult, LibraryEntry, ProcessResult, StoryboardProject, StoryboardTemplate } from '../protocol.ts'
+import type { GenerateResult, LibraryEntry, ProcessRequest, ProcessResult, StoryboardProject, StoryboardTemplate } from '../protocol.ts'
 import css from './panel.module.css'
 
 interface PanelProps {
@@ -189,8 +189,13 @@ type ProcessActionName = 'info' | 'frames' | 'gif' | 'compress' | 'concat'
 
 function ProcessView({ api }: { api: VideogenApi }) {
   const [action, setAction] = useState<ProcessActionName>('info')
+  const [source, setSource] = useState<'upload' | 'library' | 'manual'>('upload')
   const [input, setInput] = useState('')
   const [inputs, setInputs] = useState('')
+  const [upload, setUpload] = useState<{ name: string; url: string; bytes: number } | undefined>()
+  const [uploading, setUploading] = useState(false)
+  const [library, setLibrary] = useState<LibraryEntry[]>([])
+  const [librarySel, setLibrarySel] = useState('')
   const [count, setCount] = useState('4')
   const [at, setAt] = useState('')
   const [width, setWidth] = useState('')
@@ -202,14 +207,61 @@ function ProcessView({ api }: { api: VideogenApi }) {
   const [result, setResult] = useState<ProcessResult | undefined>()
   const [error, setError] = useState('')
 
+  useEffect(() => {
+    void api.libraryList()
+      .then(entries => setLibrary(entries.filter(entry => entry.type === 'video' || entry.type === 'gif')))
+      .catch(() => setLibrary([]))
+  }, [api])
+
+  const effectiveInput = source === 'upload'
+    ? upload?.url ?? ''
+    : source === 'library'
+      ? library.find(entry => entry.id === librarySel)?.url ?? ''
+      : input
+
+  const pickFile = (file: File | undefined): void => {
+    if (file === undefined) return
+    setUploading(true)
+    setError('')
+    const reader = new FileReader()
+    reader.onload = () => {
+      void (async () => {
+        try {
+          const base64 = String(reader.result ?? '').split(',')[1] ?? ''
+          const res = await api.uploadFile(file.name, base64)
+          if (res.ok === true && res.url !== undefined) setUpload({ name: file.name, url: res.url, bytes: res.bytes ?? 0 })
+          else setError(res.message ?? '上传失败')
+        } catch (err) {
+          setError(errorMessage(err))
+        } finally {
+          setUploading(false)
+        }
+      })()
+    }
+    reader.onerror = () => { setError('读取文件失败'); setUploading(false) }
+    reader.readAsDataURL(file)
+  }
+
   const run = async (): Promise<void> => {
+    const target = effectiveInput
+    const segmentInputs = inputs.split(',').map(item => item.trim()).filter(item => item !== '')
+    let usedInputs: string[] | undefined = segmentInputs
+    if (action === 'concat') {
+      if (segmentInputs.length === 0 && target !== '') usedInputs = [target]
+      if ((usedInputs?.length ?? 0) < 2) {
+        setError('concat 至少需要 2 个片段：请从输入源选择或粘贴多个 URL/路径（逗号分隔）')
+        return
+      }
+    } else if (target === '') {
+      setError('请先上传文件、从资源库选择或手动输入视频地址')
+      return
+    }
     setBusy(true)
     setError('')
     try {
-      const out = await api.processRun({
+      const payload: ProcessRequest = {
         action,
-        ...(input.trim() === '' ? {} : { input: input.trim() }),
-        ...(inputs.trim() === '' ? {} : { inputs: inputs.split(',').map(item => item.trim()).filter(item => item !== '') }),
+        ...(action === 'concat' ? { inputs: usedInputs } : { input: target }),
         ...(count === '' ? {} : { count: Number(count) }),
         ...(at === '' ? {} : { at: Number(at) }),
         ...(width === '' ? {} : { width: Number(width) }),
@@ -217,8 +269,8 @@ function ProcessView({ api }: { api: VideogenApi }) {
         ...(duration === '' ? {} : { duration: Number(duration) }),
         ...(fps === '' ? {} : { fps: Number(fps) }),
         ...(transition === '' ? {} : { transition: Number(transition) }),
-      })
-      setResult(out)
+      }
+      setResult(await api.processRun(payload))
     } catch (err) {
       setError(errorMessage(err))
     } finally {
@@ -228,16 +280,46 @@ function ProcessView({ api }: { api: VideogenApi }) {
 
   return (
     <div className={css.section}>
+      <div className={css.sectionTitle}>{tt('process.inputSource')}</div>
+      <div className={css.sourceTabs}>
+        {(['upload', 'library', 'manual'] as const).map(key => (
+          <button key={key} type="button" className={source === key ? `${css.sourceTab} ${css.sourceTabActive}` : css.sourceTab} onClick={() => setSource(key)}>{tt(`process.source.${key}` as never)}</button>
+        ))}
+      </div>
+      {source === 'upload' && (
+        <div>
+          <label className={css.uploadBox}>
+            <span>{uploading ? tt('process.uploading') : upload !== undefined ? upload.name : tt('process.uploadPick')}</span>
+            <input type="file" accept="video/*,image/*" hidden onChange={event => { pickFile(event.target.files?.[0]); event.currentTarget.value = '' }} />
+          </label>
+          {upload !== undefined && (
+            <div className={css.metaRow}>
+              <span>{tt('process.uploadDone', { name: upload.name, mb: (upload.bytes / 1024 / 1024).toFixed(1) })}</span>
+              <button type="button" className={css.linkButton} onClick={() => setUpload(undefined)}>{tt('channels.cancel')}</button>
+            </div>
+          )}
+        </div>
+      )}
+      {source === 'library' && (
+        <select className={css.select} value={librarySel} onChange={event => setLibrarySel(event.target.value)}>
+          <option value="">{library.length === 0 ? tt('process.libraryEmpty') : tt('process.libraryPick')}</option>
+          {library.map(entry => <option key={entry.id} value={entry.id}>{entry.name} · {(entry.provenance.prompt ?? '').slice(0, 40)}</option>)}
+        </select>
+      )}
+      {source === 'manual' && (
+        <input className={css.input} value={input} onChange={event => setInput(event.target.value)} placeholder={tt('process.inputHint')} />
+      )}
+      <div className={css.sectionTitle}>{tt('process.action')}</div>
       <div className={css.row}>
         <select className={css.select} value={action} onChange={event => setAction(event.target.value as ProcessActionName)}>
           <option value="info">info</option><option value="frames">frames</option><option value="gif">gif</option><option value="compress">compress</option><option value="concat">concat</option>
         </select>
       </div>
-      {action !== 'concat' && (
-        <input className={css.input} value={input} onChange={event => setInput(event.target.value)} placeholder={tt('process.input')} />
-      )}
       {action === 'concat' && (
-        <textarea className={css.textarea} value={inputs} onChange={event => setInputs(event.target.value)} placeholder={tt('process.inputs')} />
+        <div>
+          <textarea className={css.textarea} value={inputs} onChange={event => setInputs(event.target.value)} placeholder={tt('process.inputs')} />
+          <p className={css.hintLine}>{tt('process.concatHint')}</p>
+        </div>
       )}
       <div className={css.row}>
         {action === 'frames' && <input className={css.smallInput} value={count} onChange={event => setCount(event.target.value.replace(/[^\d]/g, ''))} placeholder={tt('process.count')} />}
@@ -249,7 +331,7 @@ function ProcessView({ api }: { api: VideogenApi }) {
         {action === 'concat' && <input className={css.smallInput} value={transition} onChange={event => setTransition(event.target.value.replace(/[^\d.]/g, ''))} placeholder={tt('process.transition')} />}
       </div>
       <div className={css.row}>
-        <button className={css.primary} disabled={busy} onClick={() => { void run() }}>{tt('process.run')}</button>
+        <button className={css.primary} disabled={busy || uploading} onClick={() => { void run() }}>{tt('process.run')}</button>
       </div>
       {error !== '' && <div className={css.error}>{error}</div>}
       {result !== undefined && <ProcessResultView result={result} />}

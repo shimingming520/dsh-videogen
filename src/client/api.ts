@@ -56,6 +56,13 @@ export class VideogenApi {
     return json<{ models: Array<{ alias: string; id: string }>; source: string }>(await postJson(MODEL_API.discover, { channelId }))
   }
 
+  /** Upload a browser file (name + base64) for local processing. */
+  async uploadFile(name: string, base64: string): Promise<{ ok: boolean; file?: string; url?: string; mime?: string; bytes?: number; code?: string; message?: string }> {
+    const response = await postJson('/api/dsh-videogen/upload', { name, data: base64 })
+    const body = await json<{ ok?: boolean; file?: string; url?: string; mime?: string; bytes?: number; code?: string; message?: string }>(response)
+    return { ok: body.ok === true, ...(body.file === undefined ? {} : { file: body.file }), ...(body.url === undefined ? {} : { url: body.url }), ...(body.mime === undefined ? {} : { mime: body.mime }), ...(body.bytes === undefined ? {} : { bytes: body.bytes }), ...(body.code === undefined ? {} : { code: body.code }), ...(body.message === undefined ? {} : { message: body.message }) }
+  }
+
   async historyList(): Promise<HistoryEntry[]> {
     return json<{ entries: HistoryEntry[] }>(await fetch(HISTORY_API)).then(body => body.entries ?? [])
   }
