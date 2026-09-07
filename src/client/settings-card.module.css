@@ -1,0 +1,152 @@
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 0;
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.subtitle {
+  margin: 8px 0 0;
+  font-size: 14px;
+}
+
+.hint {
+  font-size: 12px;
+  color: #888;
+}
+
+.channel {
+  border: 1px solid #e2e2e4;
+  border-radius: 10px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.channelRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.channelName {
+  font-weight: 600;
+  font-size: 13px;
+  flex: 1;
+}
+
+.defaultBadge {
+  color: #e8a100;
+}
+
+.channelMeta {
+  font-size: 11px;
+  color: #888;
+}
+
+.editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-top: 1px dashed #e2e2e4;
+  padding-top: 8px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.field label {
+  font-size: 12px;
+  color: #555;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.field input,
+.field select,
+.field textarea {
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid #ddd;
+  font-size: 12px;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+
+.field textarea {
+  min-height: 64px;
+  resize: vertical;
+}
+
+.small {
+  padding: 2px 8px;
+  border-radius: 6px;
+  border: 1px solid #ddd;
+  background: #fff;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.add {
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px dashed #aaa;
+  background: transparent;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.primary {
+  padding: 7px 18px;
+  border-radius: 8px;
+  border: none;
+  background: #4f5bff;
+  color: #fff;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.primary:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.secondary {
+  padding: 7px 14px;
+  border-radius: 8px;
+  border: 1px solid #ddd;
+  background: #fff;
+  color: #333;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.secondary:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.error {
+  color: #d43a3a;
+  font-size: 12px;
+}

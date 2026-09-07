@@ -1,0 +1,110 @@
+{
+  "name": "dsh-videogen",
+  "description": "AI video plugin for the dsh web GUI: multi-vendor video generation channels (OpenAI-compatible /v1/videos, Kling, MiniMax Hailuo, Volcengine ARK, custom generic async), FFmpeg video processing (probe / frame extraction / GIF / image compress), a lightweight storyboard studio (templates + shots + FFmpeg compose), Agent tools and a sidebar AI 视频 panel.",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-connection"
+      ],
+      "platform": "web"
+    }
+  },
+  "dependencies": {
+    "@deepseek-ai/schemastery": "^3.18.2",
+    "@ffmpeg-installer/ffmpeg": "^1.1.0"
+  },
+  "optionalDependencies": {
+    "ffmpeg-static": "^5.2.0"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-client-connection": "0.1.2-alpha.3",
+    "@deepseek-ai/dsh-client-locale": "0.1.2-alpha.3",
+    "@deepseek-ai/dsh-client-store": "0.1.2-alpha.3",
+    "@deepseek-ai/dsh-client-ui-primitives": "0.1.2-alpha.3",
+    "@deepseek-ai/dsh-client-ui-renderer": "0.1.2-alpha.3",
+    "@deepseek-ai/dsh-client-ui-settings": "0.1.2-alpha.3",
+    "@deepseek-ai/dsh-client-ui-settings-plugins": "0.1.2-alpha.3",
+    "@deepseek-ai/dsh-client-ui-slots": "0.1.2-alpha.3",
+    "@deepseek-ai/dsh-client-ui-tool": "0.1.2-alpha.3",
+    "@deepseek-ai/dsh-host-webserver": "0.1.2-alpha.3",
+    "@deepseek-ai/dsh-llm": "0.1.2-alpha.3",
+    "@deepseek-ai/dsh-settings": "0.1.2-alpha.3",
+    "@deepseek-ai/dsh-system-prompt": "0.1.2-alpha.3",
+    "@deepseek-ai/dsh-tools": "0.1.2-alpha.3",
+    "@deepseek-ai/dsh-util-values": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-workspace": "0.1.2-alpha.3",
+    "@types/ffmpeg-installer__ffmpeg": "^1.1.0",
+    "@types/ffmpeg-static": "^5.1.0",
+    "@types/node": "^22.20.0",
+    "@types/react": "~18.3.1",
+    "@types/react-dom": "^18.3.5",
+    "jsdom": "25.0.1",
+    "lightningcss": "1.32.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "tsdown": "0.22.2",
+    "typescript": "~5.7.2",
+    "vitest": "^3.2.0"
+  },
+  "files": [
+    "lib",
+    "src",
+    "skills",
+    "docs",
+    "cordis.patch.yml",
+    "README.md",
+    "README.zh-CN.md"
+  ],
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/shimingming520/dsh-videogen.git"
+  },
+  "homepage": "https://github.com/shimingming520/dsh-videogen",
+  "bugs": {
+    "url": "https://github.com/shimingming520/dsh-videogen/issues"
+  },
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "plugin",
+    "video",
+    "video-generation",
+    "text-to-video",
+    "image-to-video",
+    "ffmpeg",
+    "storyboard",
+    "kling",
+    "minimax",
+    "hailuo",
+    "volcengine",
+    "ark",
+    "openai"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsdown",
+    "watch": "tsdown --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepublishOnly": "pnpm run typecheck && pnpm run test && pnpm run build"
+  }
+}
