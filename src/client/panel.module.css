@@ -98,9 +98,20 @@ html[data-dsh-videogen-active]:not([data-dsh-taskboard-active]):not([data-dsh-ss
   font-weight: 500;
 }
 
+.tab:hover:not(.tabActive) {
+  background: var(--dsw-alias-interactive-bg-hover, #ececee);
+  color: var(--dsw-alias-label-secondary, #555);
+}
+
+/* Active module state: a subtle tinted chip + a brand underline instead of a
+   solid brand fill — themes where --dsw-alias-brand-primary is a dark color
+   (or black) previously rendered the active tab as a solid black pill with
+   black text. */
 .tabActive {
-  background: var(--dsw-alias-brand-primary, #eef0ff);
-  color: var(--dsw-alias-brand-primary, #4f5bff);
+  background: var(--dsw-alias-interactive-bg-active, #eef0ff);
+  color: var(--dsw-alias-label-primary, #222);
+  font-weight: 600;
+  box-shadow: inset 0 -2px 0 0 var(--dsw-alias-brand-primary, #4f5bff);
 }
 
 .section {
@@ -131,9 +142,10 @@ html[data-dsh-videogen-active]:not([data-dsh-taskboard-active]):not([data-dsh-ss
 }
 
 .pillActive {
-  background: var(--dsw-alias-brand-primary, #4f5bff);
+  background: var(--dsw-alias-interactive-bg-active, #eef0ff);
   border-color: var(--dsw-alias-brand-primary, #4f5bff);
-  color: #fff;
+  color: var(--dsw-alias-brand-primary, #4f5bff);
+  font-weight: 600;
 }
 
 .select,
