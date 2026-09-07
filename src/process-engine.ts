@@ -381,3 +381,87 @@ export async function runProcessAction(options: {
   }
   throw new ProcessError(`未知处理动作: ${options.action}`, 'bad-action')
 }
+
+
+/* ------------------------------------------------------------------ */
+/*  local shot-card rendering (no channel needed)                      */
+/* ------------------------------------------------------------------ */
+
+const FONT_CANDIDATES = [
+  '/Library/Fonts/Arial Unicode.ttf',
+  '/System/Library/Fonts/PingFang.ttc',
+  '/System/Library/Fonts/STHeiti Light.ttc',
+  '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc',
+  '/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc',
+  '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+  'C:\\Windows\\Fonts\\msyh.ttc',
+  'C:\\Windows\\Fonts\\segoeui.ttf',
+  '/System/Library/Fonts/Helvetica.ttc',
+]
+
+/** First existing system font (used by drawtext; CJK-friendly when available). */
+export function findFont(): string | undefined {
+  for (const candidate of FONT_CANDIDATES) {
+    try {
+      if (existsSync(candidate)) return candidate
+    } catch {
+      /* keep scanning */
+    }
+  }
+  return undefined
+}
+
+/** Escape drawtext text (single-quoted text param). */
+function escapeDrawtext(value: string): string {
+  return value.replace(/\\/g, '\\\\').replace(/'/g, '\\\'').replace(/:/g, '\\:').replace(/%/g, '\\%')
+}
+
+/** Wrap a prompt into lines of at most `width` chars (CJK-tolerant). */
+export function wrapText(text: string, width: number): string[] {
+  const out: string[] = []
+  for (const para of text.split(/[\r\n]+/)) {
+    let line = ''
+    for (const char of para) {
+      if (line.length >= width) {
+        out.push(line)
+        line = ''
+      }
+      if (char !== ' ' || line !== '') line += char
+    }
+    if (line !== '') out.push(line)
+  }
+  return out
+}
+
+/** Render a shot prompt into a styled text card with FFmpeg (no upstream call). */
+export async function renderLocalShotCard(options: {
+  title: string
+  prompt: string
+  aspectRatio: string
+  outPath: string
+  fontPath?: string
+  /** Accent color hex without '#'. */
+  accent?: string
+}): Promise<{ ok: true }> {
+  const font = options.fontPath ?? findFont()
+  if (font === undefined) {
+    throw new ProcessError('未找到可用字体（TTF/OTF/TTC），本地渲染不可用：请安装任一 CJK 字体或上传到系统字体目录', 'font-missing')
+  }
+  const [width, height] = options.aspectRatio === '9:16' ? [720, 1280] : [1280, 720]
+  const isVertical = options.aspectRatio === '9:16'
+  const lines = wrapText(options.prompt, isVertical ? 16 : 34).slice(0, isVertical ? 9 : 4)
+  const body = lines.length === 0 ? '（空提示词）' : lines.join('\\n')
+  const title = escapeDrawtext(options.title)
+  const bodyEscaped = escapeDrawtext(body)
+  const accent = options.accent ?? '4f5bff'
+  const filters = [
+    `drawbox=x=0:y=0:w=${width}:h=${height}:color=0x17171f:t=fill`,
+    `drawbox=x=${isVertical ? 44 : 64}:y=${isVertical ? 84 : 72}:w=${width - (isVertical ? 88 : 128)}:h=${height - (isVertical ? 168 : 144)}:color=0x23232b@0.92:t=fill`,
+    `drawbox=x=${isVertical ? 44 : 64}:y=${isVertical ? 84 : 72}:w=${isVertical ? 6 : 82}:h=${isVertical ? 320 : 8}:color=0x${accent}:t=fill`,
+    `drawtext=fontfile='${escapeDrawtext(font)}':text='${title}':fontcolor=0xffffff:fontsize=${isVertical ? 44 : 44}:x=${isVertical ? 66 : 170}:y=${isVertical ? 96 : 88}`,
+    `drawtext=fontfile='${escapeDrawtext(font)}':text='${bodyEscaped}':fontcolor=0xdadde5:fontsize=${isVertical ? 28 : 24}:line_spacing=12:x=${isVertical ? 66 : 88}:y=${isVertical ? 190 : 190}`,
+    `drawtext=fontfile='${escapeDrawtext(font)}':text='DSH video · LOCAL PREVIEW':fontcolor=0x6b7080:fontsize=${isVertical ? 20 : 18}:x=${isVertical ? 66 : 88}:y=${height - (isVertical ? 70 : 64)}`,
+  ]
+  await run(['-hide_banner', '-y', '-f', 'lavfi', '-i', `color=c=0x17171f:s=${width}x${height}`, '-vf', filters.join(','), '-frames:v', '1', options.outPath], 60_000)
+  return { ok: true }
+}

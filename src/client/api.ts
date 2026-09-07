@@ -114,8 +114,8 @@ export class VideogenApi {
     return json<{ ok: boolean; message?: string }>(await postJson('/api/dsh-videogen/studio/compose/cancel', { id }))
   }
 
-  async templatePreview(templateId: string, vars: Record<string, string>, signal?: AbortSignal): Promise<{ ok: boolean; thumb?: string; prompt?: string; cached?: boolean; code?: string; message?: string }> {
-    const response = await postJson('/api/dsh-videogen/studio/template-preview', { templateId, vars }, signal)
+  async templatePreview(templateId: string, vars: Record<string, string>, mode?: 'auto' | 'local', signal?: AbortSignal): Promise<{ ok: boolean; thumb?: string; prompt?: string; cached?: boolean; code?: string; message?: string }> {
+    const response = await postJson('/api/dsh-videogen/studio/template-preview', { templateId, vars, ...(mode === undefined ? {} : { mode }) }, signal)
     return json<{ ok: boolean; thumb?: string; prompt?: string; cached?: boolean; code?: string; message?: string }>(response)
   }
 

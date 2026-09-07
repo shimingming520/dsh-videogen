@@ -10,7 +10,7 @@ import { saveProject, loadProject, listProjects, removeProject, PROCESS_OUTPUT_D
 import { concatSegments } from './process-engine.ts'
 import { runGeneration, parseGenerateRequest } from './generate-core.ts'
 import { submitVideoTask, waitForTask, fetchVideo } from './video-engine.ts'
-import { extractFrames } from './process-engine.ts'
+import { extractFrames, renderLocalShotCard } from './process-engine.ts'
 import { existsSync } from 'node:fs'
 import { mkdir, writeFile, rename, unlink } from 'node:fs/promises'
 import path from 'node:path'
@@ -312,18 +312,31 @@ export function studioRoutes(deps: StudioRouteDeps): WebRoute[] {
           if (typeof value === 'string') vars[key] = value
         }
       }
+      const mode = body?.mode === 'local' ? 'local' : 'auto'
       const channel = resolveChannelFor(deps.channelsView(), undefined)
-      if (channel.apiKey.trim() === '') {
+      const channelReady = channel !== undefined && channel.apiKey.trim() !== ''
+      if (mode === 'auto' && !channelReady) {
         writeJson(res, 400, { ok: false, code: 'no-channel', message: '需要先配置视频生成渠道' })
         return
       }
       const shot = template.shots[0]
       const prompt = shot === undefined ? template.name : fillTemplate(shot.prompt, vars)
       const hash = `${templateId}-${simpleHash(prompt)}`
-      const thumbFile = `thumb_${hash}.jpg`
+      const prefix = mode === 'local' ? 'local' : 'ai'
+      const thumbFile = `thumb_${prefix}_${hash}.jpg`
       const thumbPath = path.join(PROCESS_OUTPUT_DIR, thumbFile)
       if (existsSync(thumbPath)) {
         writeJson(res, 200, { ok: true, thumb: `/api/dsh-videogen/assets/output/${encodeURIComponent(thumbFile)}`, cached: true, prompt })
+        return
+      }
+      if (mode === 'local') {
+        try {
+          await mkdir(PROCESS_OUTPUT_DIR, { recursive: true })
+          await renderLocalShotCard({ title: prompt.slice(0, 18), prompt, aspectRatio: template.aspectRatio, outPath: thumbPath })
+          writeJson(res, 200, { ok: true, thumb: `/api/dsh-videogen/assets/output/${encodeURIComponent(thumbFile)}`, prompt })
+        } catch (error) {
+          writeJson(res, 500, { ok: false, code: 'local-render-failed', message: error instanceof Error ? error.message : String(error) })
+        }
         return
       }
       try {

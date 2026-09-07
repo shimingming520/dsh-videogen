@@ -466,14 +466,11 @@ function StudioView(props: { api: VideogenApi; channels: Array<{ id: string; nam
   const [compose, setCompose] = useState<{ status: 'running' | 'done' | 'failed'; output?: { file: string; url: string }; error?: string } | undefined>()
 
   const previewTemplate = async (template: StoryboardTemplate): Promise<void> => {
-    if (props.channels.length === 0) {
-      setError(tt('studio.previewNeedsChannel'))
-      return
-    }
+    const local = props.channels.length === 0
     setThumbs(prev => ({ ...prev, [template.id]: { loading: true } }))
     setError('')
     try {
-      const out = await props.api.templatePreview(template.id, vars)
+      const out = await props.api.templatePreview(template.id, vars, local ? 'local' : undefined)
       if (out.ok === true && out.thumb !== undefined) {
         setThumbs(prev => ({ ...prev, [template.id]: { url: out.thumb } }))
       } else {
@@ -605,11 +602,11 @@ function StudioView(props: { api: VideogenApi; channels: Array<{ id: string; nam
             }
           }}>
             <span className={css.templateThumb} data-aspect={template.aspectRatio} data-template={template.id} style={thumbs[template.id]?.url !== undefined ? { backgroundImage: `url(${thumbs[template.id]!.url})`, backgroundSize: 'cover', backgroundPosition: 'center' } : undefined}>
-              <button type="button" className={css.templatePreview} disabled={thumbs[template.id]?.loading === true || props.channels.length === 0} title={props.channels.length === 0 ? tt('studio.previewNeedsChannel') : undefined} onClick={event => {
+              <button type="button" className={css.templatePreview} disabled={thumbs[template.id]?.loading === true} title={props.channels.length === 0 ? tt('studio.previewLocalHint') : undefined} onClick={event => {
                 event.stopPropagation()
                 void previewTemplate(template)
               }}>
-                {thumbs[template.id]?.loading === true ? tt('studio.previewing') : tt('studio.preview')}
+                {thumbs[template.id]?.loading === true ? tt('studio.previewing') : props.channels.length === 0 ? tt('studio.previewLocal') : tt('studio.preview')}
               </button>
             </span>
             <span className={css.templateName}>{template.name}</span>

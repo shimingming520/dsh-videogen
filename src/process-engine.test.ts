@@ -4,7 +4,7 @@ import { mkdtemp, readFile, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { existsSync } from 'node:fs'
-import { resolveFFmpeg, probeInfo, extractFrames, videoToGif, compressImage, concatSegments } from './process-engine.ts'
+import { resolveFFmpeg, probeInfo, extractFrames, videoToGif, compressImage, concatSegments, renderLocalShotCard, wrapText, findFont } from './process-engine.ts'
 
 /** Smoke tests for the FFmpeg processing engine. Skipped when no binary. */
 const ffmpegAvailable = (() => {
@@ -56,6 +56,20 @@ describe.skipIf(!ffmpegAvailable)('ffmpeg processing engine', () => {
     const out = path.join(dir, 'compressed.jpg')
     await compressImage(path.join(dir, frames[0]!.file), { width: 160, quality: 5, outPath: out })
     expect((await stat(out)).size).toBeGreaterThan(100)
+  })
+
+  it('wraps CJK prompts into lines', () => {
+    const lines = wrapText('这是一段比较长的中文提示词用来测试换行是否正确处理中文字符', 12)
+    expect(lines.length).toBeGreaterThan(1)
+    expect(lines[0]!.length).toBeLessThanOrEqual(12)
+  })
+
+  it('renders a local shot card (skipped without a font)', async () => {
+    const font = findFont()
+    if (font === undefined) return
+    const out = path.join(dir, 'card.jpg')
+    await renderLocalShotCard({ title: '品牌炫酷开场', prompt: '赛博朋克风格，产品悬浮在黑暗中，聚光灯扫过轮廓，电影感开场镜头', aspectRatio: '16:9', outPath: out })
+    expect((await stat(out)).size).toBeGreaterThan(500)
   })
 
   it('concatenates two segments', async () => {
