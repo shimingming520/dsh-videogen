@@ -388,7 +388,7 @@ export function VideoGenSettingsCard(props: { scope: VideogenScope }) {
                         <label className={css.label} htmlFor={`video-channel-key-${channel.id}`}>{tt('channel.apiKey')}</label>
                         {hasSecret(channel.id) && channel.keyStaged === undefined ? <button type="button" className={css.reset} disabled={!canEdit} onClick={() => updateChannel(channel.id, { keyStaged: '' })}>{tt('channel.clearKey')}</button> : null}
                       </div>
-                      <input id={`video-channel-key-${channel.id}`} className={css.input} type="password" autoComplete="off" placeholder={hasSecret(channel.id) && channel.keyStaged !== '' ? '••••••••' : ''} value={channel.keyStaged ?? ''} disabled={!canEdit} onChange={event => updateChannel(channel.id, { keyStaged: event.target.value === '' ? undefined : event.target.value })} />
+                      <input id={`video-channel-key-${channel.id}`} className={css.input} type="password" name={`videogen-apikey-${channel.id}`} autoComplete="new-password" data-lpignore="true" placeholder={hasSecret(channel.id) && channel.keyStaged !== '' ? tt('channel.apiKeyStoredPlaceholder') : tt('channel.apiKeyPlaceholder')} value={channel.keyStaged ?? ''} disabled={!canEdit} onChange={event => updateChannel(channel.id, { keyStaged: event.target.value === '' ? undefined : event.target.value })} />
                       <p className={css.sectionHint}>{hasSecret(channel.id) ? tt('channel.apiKeyStoredHint') : tt('channel.apiKeyHint')}</p>
                     </div>
                     <details className={css.customSettings}>
@@ -443,7 +443,7 @@ export function VideoGenSettingsCard(props: { scope: VideogenScope }) {
                         </div>
                         <button type="button" className={css.linkButton} disabled={!canEdit || !persisted} title={persisted ? undefined : tt('channel.discoverNeedsSave')} onClick={() => { void api.discoverModels(channel.id).then(result => updateChannel(channel.id, { models: result.models })).catch(error => setError(tt('channel.modelsDiscoverFailed', { error: errorMessage(error) }))) }}>{tt('channel.modelsDiscover')}</button>
                       </div>
-                      <textarea className={css.textarea} aria-label={tt('channel.models')} value={modelsToText(channel.models)} disabled={!canEdit} onChange={event => updateChannel(channel.id, { models: textToModels(event.target.value) })} placeholder="sora-2=sora-2" />
+                      <textarea className={css.textarea} aria-label={tt('channel.models')} value={modelsToText(channel.models)} disabled={!canEdit} onChange={event => updateChannel(channel.id, { models: textToModels(event.target.value) })} placeholder={tt('channel.modelsPlaceholder')} />
                       <p className={css.sectionHint}>{tt('channel.modelsHint')}</p>
                     </div>
                     <label className={css.defaultField}>
