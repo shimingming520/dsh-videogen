@@ -29,13 +29,11 @@ html[data-dsh-videogen-active]:not([data-dsh-taskboard-active]):not([data-dsh-ss
 }
 
 .view {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  flex-direction: column;
+  /* NOTE: never set `display` here — the attribute rules above own the
+     show/hide switch (default display:none). A display on .view (same
+     specificity, later in the file) would override the default hidden state
+     and make the panel overlay the session from startup. */
   overflow: hidden;
-  background: var(--dsh-bg, #f7f7f8);
-  z-index: 40;
 }
 
 .panel {
