@@ -75,11 +75,16 @@ export function resolveFFmpeg(): string {
   throw new ProcessError('未找到 FFmpeg：请安装 ffmpeg（brew install ffmpeg）或设置 FFMPEG_PATH 环境变量', 'ffmpeg-missing')
 }
 
-function run(args: string[], timeoutMs = 300_000): Promise<{ stdout: string; stderr: string }> {
+function run(args: string[], timeoutMs = 300_000, signal?: AbortSignal): Promise<{ stdout: string; stderr: string }> {
   const bin = resolveFFmpeg()
   return new Promise((resolve, reject) => {
-    const child = execFile(bin, args, { timeout: timeoutMs, maxBuffer: 64 * 1024 * 1024 }, (error, stdout, stderr) => {
+    const child = execFile(bin, args, { timeout: timeoutMs, maxBuffer: 64 * 1024 * 1024, ...(signal === undefined ? {} : { signal }) }, (error, stdout, stderr) => {
       if (error !== null) {
+        const aborted = signal?.aborted === true || (error as NodeJS.ErrnoException & { code?: string | number }).code === 'ABORT_ERR'
+        if (aborted) {
+          reject(new ProcessError('处理已取消', 'canceled'))
+          return
+        }
         const code = (error as NodeJS.ErrnoException & { code?: string | number }).code
         if (code === 'ETIMEDOUT' || typeof code === 'number' && code === 124) {
           reject(new ProcessError('FFmpeg 处理超时', 'ffmpeg-timeout'))
@@ -220,10 +225,11 @@ export async function concatSegments(segments: SegmentInput[], options: {
   transition?: number
   fps?: number
   audioUrl?: string
+  signal?: AbortSignal
 }): Promise<{ ok: true }> {
   if (segments.length === 0) throw new ProcessError('没有可合成的片段', 'concat-empty')
   if (segments.length === 1 && options.transition === undefined) {
-    await run(['-hide_banner', '-y', '-i', segments[0].input, '-c', 'copy', options.outPath], 600_000)
+    await run(['-hide_banner', '-y', '-i', segments[0].input, '-c', 'copy', options.outPath], 600_000, options.signal)
     return { ok: true }
   }
   const tempDir = await impromptuDir()
@@ -239,7 +245,7 @@ export async function concatSegments(segments: SegmentInput[], options: {
       const args: string[] = ['-hide_banner', '-y', '-i', segment.input]
       if (segment.duration !== undefined && segment.duration > 0) args.push('-t', String(segment.duration))
       args.push('-vf', `${scaleFilter},fps=${fps}`, '-an', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', temp)
-      await run(args, 600_000)
+      await run(args, 600_000, options.signal)
       normalized.push(temp)
     }
     // Stage 2: xfade chain (if transition > 0) else concat.
@@ -255,23 +261,23 @@ export async function concatSegments(segments: SegmentInput[], options: {
         const copy = normalized[index]!
         if (index < normalized.length - 1) {
           const fixedFile = path.join(tempDir, `segfix_${index}.mp4`)
-          await run(['-hide_banner', '-y', '-i', copy, '-t', String(target), '-c', 'copy', fixedFile], 600_000)
+          await run(['-hide_banner', '-y', '-i', copy, '-t', String(target), '-c', 'copy', fixedFile], 600_000, options.signal)
           trimmed.push(fixedFile)
         } else {
           trimmed.push(copy)
         }
       }
       const unit = Math.max(target - transition, 0.1)
-      await run(['-hide_banner', '-y', ...xfadeArgs(trimmed, transition, unit), options.outPath], 900_000)
+      await run(['-hide_banner', '-y', ...xfadeArgs(trimmed, transition, unit), options.outPath], 900_000, options.signal)
     } else {
       const listFile = path.join(tempDir, 'concat.txt')
       await writeFile(listFile, normalized.map(file => `file '${file.replace(/'/g, "'\\''")}'`).join('\n'))
-      await run(['-hide_banner', '-y', '-f', 'concat', '-safe', '0', '-i', listFile, '-c', 'copy', options.outPath], 900_000)
+      await run(['-hide_banner', '-y', '-f', 'concat', '-safe', '0', '-i', listFile, '-c', 'copy', options.outPath], 900_000, options.signal)
     }
     // Stage 3: optional background audio mix.
     if (options.audioUrl !== undefined && options.audioUrl.trim() !== '') {
       const mixed = path.join(tempDir, 'mixed.mp4')
-      await run(['-hide_banner', '-y', '-i', options.outPath, '-i', options.audioUrl, '-map', '0:v:0', '-map', '1:a:0', '-c:v', 'copy', '-c:a', 'aac', '-shortest', mixed], 600_000)
+      await run(['-hide_banner', '-y', '-i', options.outPath, '-i', options.audioUrl, '-map', '0:v:0', '-map', '1:a:0', '-c:v', 'copy', '-c:a', 'aac', '-shortest', mixed], 600_000, options.signal)
       const finalData = await readFile(mixed)
       await writeFile(options.outPath, finalData)
     }

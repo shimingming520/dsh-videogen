@@ -110,6 +110,15 @@ export class VideogenApi {
     return json<{ status: string; output?: { file: string; url: string }; error?: string }>(await fetch(`/api/dsh-videogen/studio/compose/status?id=${encodeURIComponent(id)}`))
   }
 
+  async studioComposeCancel(id: string): Promise<{ ok: boolean; message?: string }> {
+    return json<{ ok: boolean; message?: string }>(await postJson('/api/dsh-videogen/studio/compose/cancel', { id }))
+  }
+
+  async templatePreview(templateId: string, vars: Record<string, string>, signal?: AbortSignal): Promise<{ ok: boolean; thumb?: string; prompt?: string; cached?: boolean; code?: string; message?: string }> {
+    const response = await postJson('/api/dsh-videogen/studio/template-preview', { templateId, vars }, signal)
+    return json<{ ok: boolean; thumb?: string; prompt?: string; cached?: boolean; code?: string; message?: string }>(response)
+  }
+
   async libraryUpdate(id: string, patch: { name?: string; tags?: string[]; category?: string }): Promise<LibraryEntry[]> {
     const response = await fetch(LIBRARY_API, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id, ...patch }) })
     const body = await json<{ entries: LibraryEntry[] }>(response)

@@ -5,10 +5,15 @@
 
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
-import { STORYBOARD_TEMPLATES, createProjectFromTemplate, updateShot, shotInputs } from './studio-engine.ts'
+import { STORYBOARD_TEMPLATES, createProjectFromTemplate, updateShot, shotInputs, storyboardTemplateById, fillTemplate } from './studio-engine.ts'
 import { saveProject, loadProject, listProjects, removeProject, PROCESS_OUTPUT_DIR } from './video-store.ts'
 import { concatSegments } from './process-engine.ts'
 import { runGeneration, parseGenerateRequest } from './generate-core.ts'
+import { submitVideoTask, waitForTask, fetchVideo } from './video-engine.ts'
+import { extractFrames } from './process-engine.ts'
+import { existsSync } from 'node:fs'
+import { mkdir, writeFile, rename, unlink } from 'node:fs/promises'
+import path from 'node:path'
 import type { VideoChannel } from './video-engine.ts'
 import { VideoGenError } from './video-engine.ts'
 import { writeJson, readJsonBody, methodGuard } from './routes-util.ts'
@@ -147,7 +152,7 @@ export function studioRoutes(deps: StudioRouteDeps): WebRoute[] {
 
   // Async compose registry: projectId -> running task state (memory only;
   // a restart just re-runs compose).
-  const composeTasks = new Map<string, { status: 'running' | 'done' | 'failed'; output?: { file: string; url: string }; error?: string }>()
+  const composeTasks = new Map<string, { status: 'running' | 'done' | 'failed'; output?: { file: string; url: string }; error?: string; controller: AbortController }>()
 
   routes.push({
     kind: 'exact',
@@ -174,7 +179,8 @@ export function studioRoutes(deps: StudioRouteDeps): WebRoute[] {
         writeJson(res, 409, { ok: false, code: 'compose-running', message: '该项目正在合成中' })
         return
       }
-      const task = { status: 'running' as const }
+      const controller = new AbortController()
+      const task = { status: 'running' as const, controller }
       composeTasks.set(project.id, task)
       void (async () => {
         try {
@@ -184,13 +190,32 @@ export function studioRoutes(deps: StudioRouteDeps): WebRoute[] {
             height: aspectHeight(project.aspectRatio),
             transition,
             audioUrl,
+            signal: controller.signal,
           })
-          composeTasks.set(project.id, { status: 'done', output: { file: outFile, url: `/api/dsh-videogen/assets/output/${encodeURIComponent(outFile)}` } })
+          if (!controller.signal.aborted) composeTasks.set(project.id, { status: 'done', output: { file: outFile, url: `/api/dsh-videogen/assets/output/${encodeURIComponent(outFile)}` }, controller })
         } catch (error) {
-          composeTasks.set(project.id, { status: 'failed', error: error instanceof Error ? error.message : String(error) })
+          const message = controller.signal.aborted ? '已取消' : error instanceof Error ? error.message : String(error)
+          composeTasks.set(project.id, { status: 'failed', error: message, controller })
         }
       })()
       writeJson(res, 200, { ok: true, projectId: project.id, status: 'running' })
+    },
+  })
+
+  routes.push({
+    kind: 'exact',
+    path: '/api/dsh-videogen/studio/compose/cancel',
+    handler: async (req: IncomingMessage, res: ServerResponse) => {
+      if (!methodGuard(req, res, 'POST')) return
+      const body = await readJsonBody(req)
+      const id = typeof body?.id === 'string' ? body.id : ''
+      const task = composeTasks.get(id)
+      if (task !== undefined && task.status === 'running') {
+        task.controller.abort()
+        writeJson(res, 200, { ok: true })
+      } else {
+        writeJson(res, 200, { ok: true, message: '没有进行中的合成任务' })
+      }
     },
   })
 
@@ -211,7 +236,7 @@ export function studioRoutes(deps: StudioRouteDeps): WebRoute[] {
         return
       }
       composeTasks.delete(id)
-      writeJson(res, 200, task)
+      writeJson(res, 200, { status: task.status, ...(task.output === undefined ? {} : { output: task.output }), ...(task.error === undefined ? {} : { error: task.error }) })
     },
   })
 
@@ -269,7 +294,83 @@ export function studioRoutes(deps: StudioRouteDeps): WebRoute[] {
     },
   })
 
+  routes.push({
+    kind: 'exact',
+    path: '/api/dsh-videogen/studio/template-preview',
+    handler: async (req: IncomingMessage, res: ServerResponse) => {
+      if (!methodGuard(req, res, 'POST')) return
+      const body = await readJsonBody(req)
+      const templateId = typeof body?.templateId === 'string' ? body.templateId : ''
+      const template = storyboardTemplateById(templateId)
+      if (template === undefined) {
+        writeJson(res, 400, { ok: false, code: 'bad-template', message: '未知模板' })
+        return
+      }
+      const vars: Record<string, string> = {}
+      if (typeof body?.vars === 'object' && body.vars !== null) {
+        for (const [key, value] of Object.entries(body.vars as Record<string, unknown>)) {
+          if (typeof value === 'string') vars[key] = value
+        }
+      }
+      const channel = resolveChannelFor(deps.channelsView(), undefined)
+      if (channel.apiKey.trim() === '') {
+        writeJson(res, 400, { ok: false, code: 'no-channel', message: '需要先配置视频生成渠道' })
+        return
+      }
+      const shot = template.shots[0]
+      const prompt = shot === undefined ? template.name : fillTemplate(shot.prompt, vars)
+      const hash = `${templateId}-${simpleHash(prompt)}`
+      const thumbFile = `thumb_${hash}.jpg`
+      const thumbPath = path.join(PROCESS_OUTPUT_DIR, thumbFile)
+      if (existsSync(thumbPath)) {
+        writeJson(res, 200, { ok: true, thumb: `/api/dsh-videogen/assets/output/${encodeURIComponent(thumbFile)}`, cached: true, prompt })
+        return
+      }
+      try {
+        const submitted = await submitVideoTask(channel, {
+          mode: 'text2video',
+          prompt,
+          aspectRatio: template.aspectRatio,
+        })
+        if (submitted.ref === undefined) {
+          writeJson(res, 400, { ok: false, code: 'no-task', message: '渠道未返回任务' })
+          return
+        }
+        const outcome = await waitForTask(channel, submitted.ref, { timeoutMs: 240_000, intervalMs: 5_000 })
+        if (outcome.status !== 'completed' || outcome.videos === undefined || outcome.videos.length === 0) {
+          writeJson(res, 400, { ok: false, code: 'preview-failed', message: outcome.error ?? '预览生成超时' })
+          return
+        }
+        const fetched = await fetchVideo(outcome.videos[0]!, channel.apiKey)
+        const tmpVideo = `tmp_${simpleHash(prompt)}.mp4`
+        await mkdir(PROCESS_OUTPUT_DIR, { recursive: true })
+        await writeFile(path.join(PROCESS_OUTPUT_DIR, tmpVideo), fetched.data)
+        const frames = await extractFrames(path.join(PROCESS_OUTPUT_DIR, tmpVideo), { count: 1, outDir: PROCESS_OUTPUT_DIR })
+        await unlink(path.join(PROCESS_OUTPUT_DIR, tmpVideo)).catch(() => undefined)
+        const firstFrame = frames[0]
+        if (firstFrame === undefined) {
+          writeJson(res, 400, { ok: false, code: 'preview-failed', message: '无法提取预览帧' })
+          return
+        }
+        await rename(path.join(PROCESS_OUTPUT_DIR, firstFrame.file), thumbPath)
+        writeJson(res, 200, { ok: true, thumb: `/api/dsh-videogen/assets/output/${encodeURIComponent(thumbFile)}`, prompt })
+      } catch (error) {
+        writeJson(res, 500, { ok: false, code: 'preview-failed', message: error instanceof VideoGenError ? error.message : error instanceof Error ? error.message : String(error) })
+      }
+    },
+  })
+
   return routes
+}
+
+
+/** Small deterministic hash for cache keys (djb2). */
+function simpleHash(value: string): string {
+  let hash = 5381
+  for (let i = 0; i < value.length; i++) {
+    hash = ((hash << 5) + hash + value.charCodeAt(i)) | 0
+  }
+  return (hash >>> 0).toString(36)
 }
 
 function aspectWidth(aspect: string): number {
