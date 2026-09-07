@@ -84,7 +84,13 @@ export function makeRoutes(deps: VideogenRoutesDeps): WebRoute[] {
           writeJson(res, 400, failureOf(new Error('请求体不是合法 JSON')))
           return
         }
-        await deps.settings.mutate('dsh-videogen', body)
+        const ns = typeof body.ns === 'string' ? body.ns : ''
+        if (ns !== 'dsh-videogen' || !Array.isArray(body.ops)) {
+          writeJson(res, 400, failureOf(new Error('malformed bridge settings request')))
+          return
+        }
+        const expectedRevision = typeof body.expectedRevision === 'number' ? body.expectedRevision : undefined
+        await deps.settings.mutate(ns, body.ops as never, expectedRevision)
         writeJson(res, 200, { ok: true })
       },
     },

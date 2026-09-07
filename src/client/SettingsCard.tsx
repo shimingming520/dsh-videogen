@@ -195,6 +195,25 @@ export function VideoGenSettingsCard(props: { scope: VideogenScope }) {
     dirtyNow()
   }
 
+  const updateModelAt = (id: string, index: number, patch: { id?: string; alias?: string }): void => {
+    setChannels(prev => prev.map(channel => {
+      if (channel.id !== id) return channel
+      const models = channel.models.map((model, modelIndex) => modelIndex === index ? { ...model, ...patch } : model)
+      return { ...channel, models }
+    }))
+    dirtyNow()
+  }
+
+  const addModelRow = (id: string): void => {
+    setChannels(prev => prev.map(channel => channel.id === id ? { ...channel, models: [...channel.models, { alias: '', id: '' }] } : channel))
+    dirtyNow()
+  }
+
+  const removeModelAt = (id: string, index: number): void => {
+    setChannels(prev => prev.map(channel => channel.id === id ? { ...channel, models: channel.models.filter((_model, modelIndex) => modelIndex !== index) } : channel))
+    dirtyNow()
+  }
+
   const removeChannel = (id: string): void => {
     const next = channels.filter(channel => channel.id !== id)
     setChannels(next)
@@ -223,7 +242,9 @@ export function VideoGenSettingsCard(props: { scope: VideogenScope }) {
           apiUrl: channel.apiUrl.trim(),
           ...(channel.authMode === 'jwt' ? { authMode: 'jwt' } : {}),
           ...(channel.customJson.trim() === '' ? {} : { customJson: channel.customJson }),
-          models: channel.models,
+          models: channel.models
+            .filter(model => model.id.trim() !== '' || model.alias.trim() !== '')
+            .map(model => ({ alias: model.alias.trim() === '' ? model.id.trim() : model.alias.trim(), id: model.id.trim() })),
         })) },
         { op: 'set', path: ['defaultChannelId'], value: defaultId },
       ]
@@ -388,7 +409,15 @@ export function VideoGenSettingsCard(props: { scope: VideogenScope }) {
                         <label className={css.label} htmlFor={`video-channel-key-${channel.id}`}>{tt('channel.apiKey')}</label>
                         {hasSecret(channel.id) && channel.keyStaged === undefined ? <button type="button" className={css.reset} disabled={!canEdit} onClick={() => updateChannel(channel.id, { keyStaged: '' })}>{tt('channel.clearKey')}</button> : null}
                       </div>
-                      <input id={`video-channel-key-${channel.id}`} className={css.input} type="password" name={`videogen-apikey-${channel.id}`} autoComplete="new-password" data-lpignore="true" placeholder={hasSecret(channel.id) && channel.keyStaged !== '' ? tt('channel.apiKeyStoredPlaceholder') : tt('channel.apiKeyPlaceholder')} value={channel.keyStaged ?? ''} disabled={!canEdit} onChange={event => updateChannel(channel.id, { keyStaged: event.target.value === '' ? undefined : event.target.value })} />
+                      <input id={`video-channel-key-${channel.id}`} className={css.input} type="password" autoComplete="new-password" data-lpignore="true" placeholder={hasSecret(channel.id) && channel.keyStaged !== '' ? tt('channel.apiKeyStoredPlaceholder') : tt('channel.apiKeyPlaceholder')} value={channel.keyStaged ?? ''} disabled={!canEdit} onChange={event => updateChannel(channel.id, { keyStaged: event.target.value === '' ? undefined : event.target.value })} onFocus={event => {
+                        // A password manager may have filled the box before focus; if the DOM value
+                        // differs from our controlled state, reset it so no stale credential sticks.
+                        const expected = channel.keyStaged ?? ''
+                        if (event.currentTarget.value !== expected) {
+                          event.currentTarget.value = ''
+                          updateChannel(channel.id, { keyStaged: undefined })
+                        }
+                      }} />
                       <p className={css.sectionHint}>{hasSecret(channel.id) ? tt('channel.apiKeyStoredHint') : tt('channel.apiKeyHint')}</p>
                     </div>
                     <details className={css.customSettings}>
@@ -443,7 +472,16 @@ export function VideoGenSettingsCard(props: { scope: VideogenScope }) {
                         </div>
                         <button type="button" className={css.linkButton} disabled={!canEdit || !persisted} title={persisted ? undefined : tt('channel.discoverNeedsSave')} onClick={() => { void api.discoverModels(channel.id).then(result => updateChannel(channel.id, { models: result.models })).catch(error => setError(tt('channel.modelsDiscoverFailed', { error: errorMessage(error) }))) }}>{tt('channel.modelsDiscover')}</button>
                       </div>
-                      <textarea className={css.textarea} aria-label={tt('channel.models')} value={modelsToText(channel.models)} disabled={!canEdit} onChange={event => updateChannel(channel.id, { models: textToModels(event.target.value) })} placeholder={tt('channel.modelsPlaceholder')} />
+                      <div className={css.modelsRows} data-testid="models-editor">
+                        {channel.models.map((model, index) => (
+                          <div key={`${channel.id}-${index}`} className={css.modelRow}>
+                            <input className={css.modelId} value={model.id} placeholder="上游模型 ID" disabled={!canEdit} onChange={event => updateModelAt(channel.id, index, { id: event.target.value })} />
+                            <input className={css.modelAlias} value={model.alias} placeholder="显示名称" disabled={!canEdit} onChange={event => updateModelAt(channel.id, index, { alias: event.target.value })} />
+                            <button type="button" className={css.modelRemove} disabled={!canEdit} aria-label={tt('channels.delete')} onClick={() => removeModelAt(channel.id, index)}>×</button>
+                          </div>
+                        ))}
+                        <button type="button" className={css.addModel} disabled={!canEdit} onClick={() => addModelRow(channel.id)}>+ {tt('channel.addModel')}</button>
+                      </div>
                       <p className={css.sectionHint}>{tt('channel.modelsHint')}</p>
                     </div>
                     <label className={css.defaultField}>

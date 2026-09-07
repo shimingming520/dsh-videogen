@@ -570,3 +570,56 @@
     flex-basis: 100%;
   }
 }
+
+.modelsRows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.modelRow {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.modelId,
+.modelAlias {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 9px;
+  border-radius: 8px;
+  border: 1px solid #d9d9db;
+  background: #fafafa;
+  font-size: 13px;
+  font-family: inherit;
+}
+
+.modelRow:focus-within .modelId,
+.modelRow:focus-within .modelAlias {
+  border-color: #4f5bff;
+  background: #fff;
+}
+
+.modelRemove {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid #e3e3e5;
+  background: #fff;
+  color: #b33434;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.addModel {
+  align-self: flex-start;
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid #d9d9db;
+  background: #fff;
+  font-size: 13px;
+  cursor: pointer;
+}
