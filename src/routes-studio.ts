@@ -145,6 +145,10 @@ export function studioRoutes(deps: StudioRouteDeps): WebRoute[] {
     },
   })
 
+  // Async compose registry: projectId -> running task state (memory only;
+  // a restart just re-runs compose).
+  const composeTasks = new Map<string, { status: 'running' | 'done' | 'failed'; output?: { file: string; url: string }; error?: string }>()
+
   routes.push({
     kind: 'exact',
     path: STUDIO_API.compose,
@@ -166,18 +170,48 @@ export function studioRoutes(deps: StudioRouteDeps): WebRoute[] {
       const audioUrl = typeof body?.audioUrl === 'string' && body.audioUrl.trim() !== '' ? body.audioUrl.trim() : undefined
       const outFile = `studio_${project.id.slice(0, 8)}.mp4`
       const outPath = `${PROCESS_OUTPUT_DIR}/${outFile}`
-      try {
-        await concatSegments(segments, {
-          outPath,
-          width: aspectWidth(project.aspectRatio),
-          height: aspectHeight(project.aspectRatio),
-          transition,
-          audioUrl,
-        })
-        writeJson(res, 200, { ok: true, projectId: project.id, output: { file: outFile, url: `/api/dsh-videogen/assets/output/${encodeURIComponent(outFile)}` } })
-      } catch (error) {
-        writeJson(res, 500, { ok: false, code: 'compose-failed', message: error instanceof Error ? error.message : String(error) })
+      if (composeTasks.has(project.id)) {
+        writeJson(res, 409, { ok: false, code: 'compose-running', message: '该项目正在合成中' })
+        return
       }
+      const task = { status: 'running' as const }
+      composeTasks.set(project.id, task)
+      void (async () => {
+        try {
+          await concatSegments(segments, {
+            outPath,
+            width: aspectWidth(project.aspectRatio),
+            height: aspectHeight(project.aspectRatio),
+            transition,
+            audioUrl,
+          })
+          composeTasks.set(project.id, { status: 'done', output: { file: outFile, url: `/api/dsh-videogen/assets/output/${encodeURIComponent(outFile)}` } })
+        } catch (error) {
+          composeTasks.set(project.id, { status: 'failed', error: error instanceof Error ? error.message : String(error) })
+        }
+      })()
+      writeJson(res, 200, { ok: true, projectId: project.id, status: 'running' })
+    },
+  })
+
+  routes.push({
+    kind: 'exact',
+    path: '/api/dsh-videogen/studio/compose/status',
+    handler: async (req: IncomingMessage, res: ServerResponse) => {
+      if (!methodGuard(req, res, 'GET')) return
+      const url = new URL(req.url ?? '/api/dsh-videogen/studio/compose/status', 'http://localhost')
+      const id = url.searchParams.get('id') ?? ''
+      const task = composeTasks.get(id)
+      if (task === undefined) {
+        writeJson(res, 200, { status: 'idle' })
+        return
+      }
+      if (task.status === 'running') {
+        writeJson(res, 200, { status: 'running' })
+        return
+      }
+      composeTasks.delete(id)
+      writeJson(res, 200, task)
     },
   })
 

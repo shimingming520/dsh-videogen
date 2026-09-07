@@ -102,8 +102,23 @@ export class VideogenApi {
     })())
   }
 
-  async studioCompose(id: string, transition?: number, audioUrl?: string): Promise<{ ok: boolean; output?: { file: string; url: string }; message?: string }> {
-    return json<{ ok: boolean; output?: { file: string; url: string }; message?: string }>(await postJson(STUDIO_API.compose, { id, ...(transition === undefined ? {} : { transition }), ...(audioUrl === undefined ? {} : { audioUrl }) }))
+  async studioCompose(id: string, transition?: number, audioUrl?: string): Promise<{ ok: boolean; status?: string; output?: { file: string; url: string }; message?: string; code?: string }> {
+    return json<{ ok: boolean; status?: string; output?: { file: string; url: string }; message?: string; code?: string }>(await postJson(STUDIO_API.compose, { id, ...(transition === undefined ? {} : { transition }), ...(audioUrl === undefined ? {} : { audioUrl }) }))
+  }
+
+  async studioComposeStatus(id: string): Promise<{ status: string; output?: { file: string; url: string }; error?: string }> {
+    return json<{ status: string; output?: { file: string; url: string }; error?: string }>(await fetch(`/api/dsh-videogen/studio/compose/status?id=${encodeURIComponent(id)}`))
+  }
+
+  async libraryUpdate(id: string, patch: { name?: string; tags?: string[]; category?: string }): Promise<LibraryEntry[]> {
+    const response = await fetch(LIBRARY_API, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id, ...patch }) })
+    const body = await json<{ entries: LibraryEntry[] }>(response)
+    return body.entries ?? []
+  }
+
+  async libraryDelete(id: string): Promise<LibraryEntry[]> {
+    const body = await json<{ entries: LibraryEntry[] }>(await postJson(LIBRARY_API, { id })) 
+    return body.entries ?? []
   }
 
   async studioGenerateAll(id: string, channelId?: string, model?: string): Promise<{ results: Array<{ shotId: string; status: string; taskId?: string; url?: string; error?: string }> }> {

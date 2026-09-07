@@ -8,7 +8,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { VideogenApi } from './api.ts'
 import type { VideogenScope, VideogenScopeSnapshot } from './settings-scope.ts'
 import { tt, errorMessage } from './helpers.ts'
-import type { GenerateResult, LibraryEntry, ProcessRequest, ProcessResult, StoryboardProject, StoryboardTemplate } from '../protocol.ts'
+import type { GeneratedVideo, GenerateResult, LibraryEntry, ProcessRequest, ProcessResult, StoryboardProject, StoryboardTemplate } from '../protocol.ts'
 import css from './panel.module.css'
 
 interface PanelProps {
@@ -54,6 +54,15 @@ export function VideoGenPanel(props: PanelProps) {
 /*  Generate                                                          */
 /* ------------------------------------------------------------------ */
 
+interface PanelTask {
+  taskId: string
+  prompt: string
+  createdAt: number
+  status: string
+  videos: GeneratedVideo[]
+  error?: string
+}
+
 function GenerateView(props: { api: VideogenApi; channels: Array<{ id: string; name: string; models: Array<{ alias: string; id: string }> }> }) {
   const [mode, setMode] = useState<'text2video' | 'image2video'>('text2video')
   const [channelId, setChannelId] = useState(props.channels[0]?.id ?? '')
@@ -63,12 +72,39 @@ function GenerateView(props: { api: VideogenApi; channels: Array<{ id: string; n
   const [negative, setNegative] = useState('')
   const [aspect, setAspect] = useState('16:9')
   const [duration, setDuration] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [result, setResult] = useState<GenerateResult | undefined>()
+  const [resolution, setResolution] = useState('')
+  const [advanced, setAdvanced] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+  const [tasks, setTasks] = useState<PanelTask[]>([])
   const [error, setError] = useState('')
   const channel = props.channels.find(entry => entry.id === channelId) ?? props.channels[0]
 
-  const run = async (enhance: boolean): Promise<void> => {
+  // Poll every pending task (submit was wait:false → we drive progress here).
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setTasks(prev => {
+        const pending = prev.filter(task => task.status !== 'completed' && task.status !== 'failed')
+        if (pending.length === 0) return prev
+        void Promise.all(pending.map(async task => {
+          try {
+            const out = await props.api.queryTask(task.taskId, channelId)
+            if (out.status === 'completed' || out.status === 'failed') {
+              setTasks(current => current.map(item => item.taskId === task.taskId
+                ? { ...item, status: out.status, videos: out.videos ?? [], error: out.error }
+                : item))
+            }
+          } catch {
+            /* keep polling */
+          }
+        }))
+        return prev
+      })
+    }, 3000)
+    return () => clearInterval(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.api, channelId])
+
+  const submit = async (): Promise<void> => {
     if (props.channels.length === 0) {
       setError(tt('config.missing'))
       return
@@ -77,33 +113,55 @@ function GenerateView(props: { api: VideogenApi; channels: Array<{ id: string; n
       setError(tt('prompt.required'))
       return
     }
-    setBusy(true)
+    setSubmitting(true)
     setError('')
     try {
-      let finalPrompt = prompt.trim()
-      if (enhance) {
-        const enhanced = await props.api.enhancePrompt(finalPrompt)
-        if (enhanced.ok && enhanced.enhanced !== undefined) finalPrompt = enhanced.enhanced
-      }
       const out = await props.api.generate({
         mode,
-        prompt: finalPrompt,
+        prompt: prompt.trim(),
         ...(channelId === '' ? {} : { channelId }),
         ...(model === '' ? {} : { model }),
         ...(image.trim() === '' ? {} : { image: image.trim() }),
         ...(negative.trim() === '' ? {} : { negativePrompt: negative.trim() }),
         ...(aspect === '' ? {} : { aspectRatio: aspect }),
         ...(duration === '' ? {} : { duration: Number(duration) }),
-        wait: true,
-        waitSeconds: 240,
+        ...(resolution === '' ? {} : { resolution }),
+        wait: false,
       })
-      setResult(out)
-      if (out.status === 'failed') setError(out.error ?? '')
+      setTasks(prev => [{
+        taskId: out.taskId ?? '',
+        prompt: prompt.trim(),
+        createdAt: Date.now(),
+        status: out.status,
+        videos: out.videos ?? [],
+        ...(out.error !== undefined ? { error: out.error } : {}),
+      }, ...prev].slice(0, 20))
+      if (out.status === 'completed' && out.videos.length > 0 && out.taskId === '') {
+        // synchronous gateway answer — nothing to poll
+      }
     } catch (err) {
       setError(errorMessage(err))
     } finally {
-      setBusy(false)
+      setSubmitting(false)
     }
+  }
+
+  const enhance = async (): Promise<void> => {
+    if (prompt.trim() === '') {
+      setError(tt('prompt.required'))
+      return
+    }
+    try {
+      const out = await props.api.enhancePrompt(prompt.trim())
+      if (out.ok && out.enhanced !== undefined) setPrompt(out.enhanced)
+      else if (out.message !== undefined) setError(out.message)
+    } catch (err) {
+      setError(errorMessage(err))
+    }
+  }
+
+  const forgetTask = (taskId: string): void => {
+    setTasks(prev => prev.filter(task => task.taskId !== taskId))
   }
 
   return (
@@ -112,71 +170,69 @@ function GenerateView(props: { api: VideogenApi; channels: Array<{ id: string; n
         <button className={mode === 'text2video' ? `${css.pill} ${css.pillActive}` : css.pill} onClick={() => setMode('text2video')}>{tt('mode.text2video')}</button>
         <button className={mode === 'image2video' ? `${css.pill} ${css.pillActive}` : css.pill} onClick={() => setMode('image2video')}>{tt('mode.image2video')}</button>
       </div>
-      <div className={css.row}>
-        <select className={css.select} value={channelId} onChange={event => setChannelId(event.target.value)}>
-          {props.channels.map(entry => <option key={entry.id} value={entry.id}>{entry.name}</option>)}
-        </select>
-        <select className={css.select} value={model} onChange={event => setModel(event.target.value)}>
-          <option value="">{tt('model.label')}</option>
-          {(channel?.models ?? []).map(entry => <option key={entry.id} value={entry.alias}>{entry.alias}</option>)}
-        </select>
-        <select className={css.select} value={aspect} onChange={event => setAspect(event.target.value)}>
-          <option value="16:9">16:9</option><option value="9:16">9:16</option><option value="1:1">1:1</option><option value="4:3">4:3</option>
-        </select>
-        <input className={css.input} value={duration} onChange={event => setDuration(event.target.value.replace(/[^\d.]/g, ''))} placeholder={tt('duration.label')} />
-      </div>
-      <textarea className={css.textarea} value={prompt} onChange={event => setPrompt(event.target.value)} placeholder={tt('prompt.placeholder')} />
+      <select className={css.select} value={channelId} onChange={event => setChannelId(event.target.value)}>
+        {props.channels.map(entry => <option key={entry.id} value={entry.id}>{entry.name}</option>)}
+      </select>
+      <select className={css.select} value={model} onChange={event => setModel(event.target.value)}>
+        <option value="">{tt('model.label')}</option>
+        {(channel?.models ?? []).map(entry => <option key={entry.id} value={entry.alias}>{entry.alias}</option>)}
+      </select>
       {mode === 'image2video' && (
         <input className={css.input} value={image} onChange={event => setImage(event.target.value)} placeholder={tt('image.placeholder')} />
       )}
-      <input className={css.input} value={negative} onChange={event => setNegative(event.target.value)} placeholder={tt('negative.placeholder')} />
+      <textarea className={css.textarea} value={prompt} onChange={event => setPrompt(event.target.value)} placeholder={tt('prompt.placeholder')} />
       <div className={css.row}>
-        <button className={css.primary} disabled={busy || props.channels.length === 0} title={props.channels.length === 0 ? tt('config.missing') : undefined} onClick={() => { void run(false) }}>{busy ? tt('generating') : tt('generate')}</button>
-        <button className={css.secondary} disabled={busy || props.channels.length === 0} title={props.channels.length === 0 ? tt('config.missing') : undefined} onClick={() => { void run(true) }}>{tt('enhance')}</button>
+        <button className={css.primary} disabled={submitting || props.channels.length === 0} title={props.channels.length === 0 ? tt('config.missing') : undefined} onClick={() => { void submit() }}>{submitting ? tt('process.uploading') : tt('generate')}</button>
+        <button className={css.secondary} disabled={props.channels.length === 0} title={props.channels.length === 0 ? tt('config.missing') : undefined} onClick={() => { void enhance() }}>{tt('enhance')}</button>
+        <button className={css.secondary} onClick={() => setAdvanced(prev => !prev)}>{advanced ? tt('advanced.hide') : tt('advanced.show')}</button>
       </div>
+      {advanced && (
+        <div className={css.advancedBox}>
+          <div className={css.row}>
+            <select className={css.select} value={aspect} onChange={event => setAspect(event.target.value)}>
+              <option value="16:9">16:9</option><option value="9:16">9:16</option><option value="1:1">1:1</option><option value="4:3">4:3</option>
+            </select>
+            <input className={css.smallInput} value={duration} onChange={event => setDuration(event.target.value.replace(/[^\d.]/g, ''))} placeholder={tt('duration.label')} />
+            <input className={css.smallInput} value={resolution} onChange={event => setResolution(event.target.value)} placeholder={tt('resolution.label')} />
+          </div>
+          <input className={css.input} value={negative} onChange={event => setNegative(event.target.value)} placeholder={tt('negative.placeholder')} />
+        </div>
+      )}
       {error !== '' && <div className={css.error}>{error}</div>}
-      {result !== undefined && <ResultView result={result} />}
-      <TaskQuery api={props.api} channelId={channelId} />
+      {tasks.length > 0 && (
+        <div className={css.taskList} data-testid="generate-tasks">
+          <div className={css.sectionTitle}>{tt('results.title', { count: tasks.length })}</div>
+          {tasks.map(task => (
+            <div key={task.taskId + task.prompt} className={css.taskCard}>
+              <div className={css.taskHeader}>
+                <span className={task.status === 'completed' ? css.badgeReady : task.status === 'failed' ? css.badgeFailed : css.badgeProcessing}>{tt(`task.state.${task.status}` as never)}</span>
+                <span className={css.taskPrompt}>{task.prompt.slice(0, 60)}{task.prompt.length > 60 ? '…' : ''}</span>
+                <button className={css.linkButton} onClick={() => forgetTask(task.taskId)}>{tt('channels.delete')}</button>
+              </div>
+              {task.status === 'completed' && <VideoGrid videos={task.videos} />}
+              {task.status === 'failed' && <div className={css.error}>{task.error ?? tt('task.state.failed')}</div>}
+              {task.status !== 'completed' && task.status !== 'failed' && (
+                <div className={css.processingRow}><span className={css.spinner} />{tt('generating')}</div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
 
-function ResultView({ result }: { result: GenerateResult }) {
-  if (result.status === 'completed') {
-    return (
-      <div className={css.result}>
-        <div className={css.resultTitle}>{tt('result.done')}</div>
-        {result.videos.map((video, index) => (
-          <div key={index} className={css.mediaRow}>
-            {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-            <video className={css.video} src={video.url} controls preload="metadata" />
-            <a className={css.link} href={video.url} download>{tt('download')}</a>
-          </div>
-        ))}
-      </div>
-    )
-  }
-  if (result.status === 'failed') {
-    return <div className={css.error}>{tt('result.failed', { error: result.error ?? 'unknown' })}</div>
-  }
-  return <div className={css.pending}>{tt('result.pending', { id: result.taskId ?? '' })}</div>
-}
-
-function TaskQuery(props: { api: VideogenApi; channelId: string }) {
-  const [taskId, setTaskId] = useState('')
-  const [result, setResult] = useState<GenerateResult | undefined>()
-  const [error, setError] = useState('')
+function VideoGrid({ videos }: { videos: GeneratedVideo[] }) {
+  if (videos.length === 0) return null
   return (
-    <div className={css.row}>
-      <input className={css.input} value={taskId} onChange={event => setTaskId(event.target.value)} placeholder={tt('task.placeholder')} />
-      <button
-        disabled={taskId.trim() === ''}
-        onClick={() => {
-          void props.api.queryTask(taskId.trim(), props.channelId).then(setResult).catch((err: unknown) => setError(errorMessage(err)))
-        }}
-      >{tt('query')}</button>
-      {error !== '' && <div className={css.error}>{error}</div>}
-      {result !== undefined && <ResultView result={result} />}
+    <div className={css.videoGrid}>
+      {videos.map((video, index) => (
+        <div key={index + video.url} className={css.videoCard}>
+          {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+          <video className={css.video} src={video.url} controls preload="metadata" />
+          <a className={css.link} href={video.url} download>{tt('download')}</a>
+        </div>
+      ))}
     </div>
   )
 }
@@ -379,6 +435,8 @@ function StudioView(props: { api: VideogenApi; channels: Array<{ id: string; nam
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
+  const [dragIndex, setDragIndex] = useState<number | undefined>()
+  const [compose, setCompose] = useState<{ status: 'running' | 'done' | 'failed'; output?: { file: string; url: string }; error?: string } | undefined>()
 
   const refresh = useMemo(() => async (): Promise<void> => {
     try {
@@ -395,6 +453,19 @@ function StudioView(props: { api: VideogenApi; channels: Array<{ id: string; nam
     void refresh()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Poll an in-flight compose task.
+  useEffect(() => {
+    if (selected === undefined || compose === undefined || compose.status !== 'running') return
+    const timer = setInterval(() => {
+      void props.api.studioComposeStatus(selected.id).then(next => {
+        if (next.status !== 'running') {
+          setCompose(next.status === 'done' ? { status: 'done', output: next.output } : { status: 'failed', error: next.error })
+        }
+      }).catch(() => { /* keep polling */ })
+    }, 2500)
+    return () => clearInterval(timer)
+  }, [props.api, selected, compose])
 
   const selectedTemplate = templates.find(template => template.id === templateId)
 
@@ -414,6 +485,7 @@ function StudioView(props: { api: VideogenApi; channels: Array<{ id: string; nam
   }
 
   const open = async (id: string): Promise<void> => {
+    setCompose(undefined)
     const project = await props.api.studioGet(id)
     if (project !== undefined) setSelected(project)
   }
@@ -435,39 +507,46 @@ function StudioView(props: { api: VideogenApi; channels: Array<{ id: string; nam
     }
   }
 
-  const compose = async (): Promise<void> => {
+  const startCompose = async (): Promise<void> => {
     if (selected === undefined) return
-    setBusy(true)
     setError('')
+    setCompose({ status: 'running' })
     try {
       const out = await props.api.studioCompose(selected.id)
-      if (out.ok && out.output !== undefined) {
-        setSelected(await props.api.studioGet(selected.id) ?? selected)
-        window.open(out.output.url, '_blank')
-        setMessage('composed')
-      } else {
-        setError(out.message ?? 'compose failed')
+      if (out.ok !== true) {
+        setCompose({ status: 'failed', error: out.message ?? 'compose failed' })
       }
     } catch (err) {
-      setError(errorMessage(err))
-    } finally {
-      setBusy(false)
+      setCompose({ status: 'failed', error: errorMessage(err) })
     }
+  }
+
+  const reorderShots = (from: number, to: number): void => {
+    if (selected === undefined || from === to) return
+    const shots = [...selected.shots]
+    const [moved] = shots.splice(from, 1)
+    shots.splice(to, 0, moved)
+    const next = { ...selected, shots, updatedAt: Date.now() }
+    setSelected(next)
+    void props.api.studioUpdate(selected.id, undefined, { shots: next.shots }).then(project => setSelected(project)).catch(() => { /* keep local order */ })
   }
 
   return (
     <div className={css.section}>
-      <div className={css.row}>
-        <select className={css.select} value={templateId} onChange={event => {
-          setTemplateId(event.target.value)
-          const template = templates.find(item => item.id === event.target.value)
-          const next: Record<string, string> = {}
-          for (const variable of template?.variables ?? []) next[variable.key] = ''
-          setVars(next)
-        }}>
-          {templates.map(template => <option key={template.id} value={template.id}>{template.name}</option>)}
-        </select>
-        <button className={css.primary} disabled={busy} onClick={() => { void create() }}>{tt('studio.new')}</button>
+      <div className={css.sectionTitle}>{tt('studio.templates')}</div>
+      <div className={css.templateGrid}>
+        {templates.map(template => (
+          <button key={template.id} type="button" className={templateId === template.id ? `${css.templateCard} ${css.templateCardActive}` : css.templateCard} onClick={() => {
+            setTemplateId(template.id)
+            const next: Record<string, string> = {}
+            for (const variable of template.variables ?? []) next[variable.key] = ''
+            setVars(next)
+          }}>
+            <span className={css.templateThumb} data-aspect={template.aspectRatio} data-template={template.id} />
+            <span className={css.templateName}>{template.name}</span>
+            <span className={css.templateMeta}>{template.shots.length} 镜头 · {template.duration}s · {template.aspectRatio}</span>
+          </button>
+        ))}
       </div>
       {selectedTemplate !== undefined && (
         <div className={css.templateMeta}>
@@ -478,6 +557,9 @@ function StudioView(props: { api: VideogenApi; channels: Array<{ id: string; nam
               <input className={css.input} value={vars[variable.key] ?? ''} onChange={event => setVars(prev => ({ ...prev, [variable.key]: event.target.value }))} placeholder={variable.hint ?? ''} />
             </div>
           ))}
+          <div className={css.row}>
+            <button className={css.primary} disabled={busy || templates.length === 0} onClick={() => { void create() }}>{tt('studio.new')}</button>
+          </div>
         </div>
       )}
       {projects.length > 0 && (
@@ -493,11 +575,21 @@ function StudioView(props: { api: VideogenApi; channels: Array<{ id: string; nam
           <div className={css.shotHeader}>
             <span>{tt('studio.shots')}</span>
             <button className={css.secondary} disabled={busy || props.channels.length === 0} title={props.channels.length === 0 ? tt('config.missing') : undefined} onClick={() => { void generateAll() }}>{tt('studio.generateAll')}</button>
-            <button className={css.secondary} disabled={busy} onClick={() => { void compose() }}>{tt('studio.compose')}</button>
+            <button className={css.secondary} disabled={busy || compose?.status === 'running'} onClick={() => { void startCompose() }}>{tt('studio.compose')}</button>
           </div>
-          {selected.shots.map(shot => (
-            <div key={shot.id} className={css.shot}>
+          <p className={css.hintLine}>{tt('studio.dragHint')}</p>
+          {selected.shots.map((shot, index) => (
+            <div
+              key={shot.id}
+              className={dragIndex === index ? `${css.shot} ${css.shotDragging}` : css.shot}
+              draggable
+              onDragStart={() => setDragIndex(index)}
+              onDragOver={event => event.preventDefault()}
+              onDrop={() => { reorderShots(dragIndex ?? index, index); setDragIndex(undefined) }}
+              onDragEnd={() => setDragIndex(undefined)}
+            >
               <div className={css.shotTitle}>
+                <span className={css.dragHandle}>⋮⋮</span>
                 {shot.name}
                 <span className={shot.status === 'ready' ? css.badgeReady : shot.status === 'failed' ? css.badgeFailed : css.badgePending}>
                   {tt(`studio.${shot.status}` as never)}
@@ -511,6 +603,20 @@ function StudioView(props: { api: VideogenApi; channels: Array<{ id: string; nam
               )}
             </div>
           ))}
+          {compose !== undefined && compose.status === 'running' && (
+            <div className={css.composeRow}>
+              <div className={css.progressBar}><span /></div>
+              <span className={css.hintLine}>{tt('studio.composing')}</span>
+            </div>
+          )}
+          {compose !== undefined && compose.status === 'done' && compose.output !== undefined && (
+            <div className={css.result}>
+              {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+              <video className={css.video} src={compose.output.url} controls preload="metadata" />
+              <a className={css.link} href={compose.output.url} download>{tt('download')}</a>
+            </div>
+          )}
+          {compose !== undefined && compose.status === 'failed' && <div className={css.error}>{compose.error ?? 'compose failed'}</div>}
         </div>
       )}
       {message !== '' && <div className={css.info}>{message}</div>}
@@ -525,7 +631,12 @@ function StudioView(props: { api: VideogenApi; channels: Array<{ id: string; nam
 
 function LibraryView({ api }: { api: VideogenApi }) {
   const [entries, setEntries] = useState<LibraryEntry[]>([])
+  const [keyword, setKeyword] = useState('')
+  const [typeFilter, setTypeFilter] = useState('')
   const [error, setError] = useState('')
+  const [renamingId, setRenamingId] = useState<string | undefined>()
+  const [renameValue, setRenameValue] = useState('')
+
   const refresh = useMemo(() => async (): Promise<void> => {
     try {
       setEntries(await api.libraryList())
@@ -533,25 +644,80 @@ function LibraryView({ api }: { api: VideogenApi }) {
       setError(errorMessage(err))
     }
   }, [api])
+
   useEffect(() => {
     void refresh()
   }, [refresh])
+
+  const filtered = entries.filter(entry => {
+    if (typeFilter !== '' && entry.type !== typeFilter) return false
+    if (keyword.trim() !== '') {
+      const haystack = `${entry.name} ${(entry.tags ?? []).join(' ')} ${entry.category ?? ''} ${entry.provenance.prompt ?? ''} ${entry.provenance.model ?? ''}`.toLowerCase()
+      if (!haystack.includes(keyword.trim().toLowerCase())) return false
+    }
+    return true
+  })
+
+  const rename = async (id: string): Promise<void> => {
+    if (renameValue.trim() === '') return
+    try {
+      setEntries(await api.libraryUpdate(id, { name: renameValue.trim() }))
+      setRenamingId(undefined)
+    } catch (err) {
+      setError(errorMessage(err))
+    }
+  }
+
+  const remove = async (id: string): Promise<void> => {
+    try {
+      setEntries(await api.libraryDelete(id))
+    } catch (err) {
+      setError(errorMessage(err))
+    }
+  }
+
   return (
     <div className={css.section}>
-      {entries.length === 0 && <div className={css.info}>{tt('library.empty')}</div>}
-      {entries.map(entry => (
-        <div key={entry.id} className={css.libraryEntry}>
-          <div className={css.shotTitle}>{entry.name} <span className={css.badgePending}>{entry.type}</span></div>
-          <div className={css.shotPrompt}>{entry.provenance.prompt ?? ''}</div>
-          {entry.type === 'video' && entry.url !== undefined && (
-            // eslint-disable-next-line jsx-a11y/media-has-caption
-            <video className={css.video} src={entry.url} controls preload="metadata" />
-          )}
-          {entry.type === 'gif' && entry.url !== undefined && (
-            <img className={css.frame} src={entry.url} alt={entry.name} />
-          )}
-        </div>
-      ))}
+      <div className={css.row}>
+        <input className={css.input} value={keyword} onChange={event => setKeyword(event.target.value)} placeholder={tt('library.search')} />
+        <select className={css.select} style={{ flex: '0 0 auto' }} value={typeFilter} onChange={event => setTypeFilter(event.target.value)}>
+          <option value="">{tt('library.type.all')}</option>
+          <option value="video">video</option><option value="gif">gif</option><option value="image">image</option><option value="storyboard">storyboard</option>
+        </select>
+      </div>
+      {filtered.length === 0 && <div className={css.info}>{keyword === '' && typeFilter === '' ? tt('library.empty') : tt('library.filterEmpty')}</div>}
+      <div className={css.libraryGrid}>
+        {filtered.map(entry => (
+          <div key={entry.id} className={css.libraryCard}>
+            <div className={css.libraryMedia}>
+              {entry.type === 'image' && entry.url !== undefined && <img src={entry.url} alt={entry.name} />}
+              {entry.type === 'gif' && entry.url !== undefined && <img src={entry.url} alt={entry.name} />}
+              {(entry.type === 'video' || entry.type === 'storyboard') && entry.url !== undefined && (
+                // eslint-disable-next-line jsx-a11y/media-has-caption
+                <video className={css.video} src={entry.url} controls preload="metadata" />
+              )}
+            </div>
+            <div className={css.libraryBody}>
+              {renamingId === entry.id ? (
+                <div className={css.row}>
+                  <input className={css.input} value={renameValue} onChange={event => setRenameValue(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') void rename(entry.id) }} />
+                  <button className={css.linkButton} onClick={() => { void rename(entry.id) }}>{tt('settings.save')}</button>
+                  <button className={css.linkButton} onClick={() => setRenamingId(undefined)}>{tt('channels.cancel')}</button>
+                </div>
+              ) : (
+                <div className={css.libraryName}>{entry.name} <span className={css.badgePending}>{entry.type}</span></div>
+              )}
+              {renamingId !== entry.id && (
+                <div className={css.libraryOps}>
+                  <button className={css.linkButton} onClick={() => { setRenamingId(entry.id); setRenameValue(entry.name) }}>{tt('library.rename')}</button>
+                  <button className={css.linkButton} onClick={() => { void remove(entry.id) }}>{tt('channels.delete')}</button>
+                </div>
+              )}
+              {entry.provenance.prompt !== undefined && <div className={css.shotPrompt}>{entry.provenance.prompt.slice(0, 80)}</div>}
+            </div>
+          </div>
+        ))}
+      </div>
       {error !== '' && <div className={css.error}>{error}</div>}
     </div>
   )

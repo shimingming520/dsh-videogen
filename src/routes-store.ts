@@ -70,6 +70,33 @@ export function libraryRoutes(): WebRoute[] {
       kind: 'exact',
       path: LIBRARY_API,
       handler: async (req: IncomingMessage, res: ServerResponse) => {
+        if (!methodGuard(req, res, 'PUT')) return
+        const body = await readJsonBody(req)
+        const id = typeof body?.id === 'string' ? body.id : ''
+        if (id === '') {
+          writeJson(res, 400, { ok: false, code: 'bad-id', message: '缺少 id' })
+          return
+        }
+        const entries = await listLibrary()
+        const entry = entries.find(item => item.id === id)
+        if (entry === undefined) {
+          writeJson(res, 404, { ok: false, code: 'not-found', message: '条目不存在' })
+          return
+        }
+        const updated = {
+          ...entry,
+          ...(typeof body?.name === 'string' && body.name.trim() !== '' ? { name: body.name.trim() } : {}),
+          ...(Array.isArray(body?.tags) ? { tags: (body.tags as unknown[]).filter((item): item is string => typeof item === 'string').slice(0, 12) } : {}),
+          ...(typeof body?.category === 'string' ? { category: body.category.trim() } : {}),
+        }
+        await upsertLibrary(updated)
+        writeJson(res, 200, { entries: await listLibrary() })
+      },
+    },
+    {
+      kind: 'exact',
+      path: LIBRARY_API,
+      handler: async (req: IncomingMessage, res: ServerResponse) => {
         if (!methodGuard(req, res, 'POST')) return
         const body = await readJsonBody(req)
         const type = LIBRARY_TYPES.includes(body?.type as LibraryType) ? body?.type as LibraryType : undefined
