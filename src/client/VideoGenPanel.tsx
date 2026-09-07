@@ -31,9 +31,9 @@ export function VideoGenPanel(props: PanelProps) {
   if (!enabled) {
     return <div className={css.viewEmpty}>{tt('config.disabled')}</div>
   }
-  if (!haveChannels) {
-    return <div className={css.viewEmpty}>{tt('config.missing')}</div>
-  }
+  // The panel never locks the whole view on a missing channel config: only
+  // generation-related actions need a channel, process / studio / library
+  // keep working. A non-blocking banner + disabled buttons carry the hint.
   return (
     <div className={css.panel}>
       <div className={css.tabs}>
@@ -41,6 +41,7 @@ export function VideoGenPanel(props: PanelProps) {
           <button key={key} className={tab === key ? `${css.tab} ${css.tabActive}` : css.tab} onClick={() => setTab(key)}>{tt(`tab.${key}` as never)}</button>
         ))}
       </div>
+      {!haveChannels && <div className={css.banner}>{tt('config.missing')}</div>}
       {tab === 'generate' && <GenerateView api={props.api} channels={channels} />}
       {tab === 'process' && <ProcessView api={props.api} />}
       {tab === 'studio' && <StudioView api={props.api} channels={channels} />}
@@ -68,6 +69,10 @@ function GenerateView(props: { api: VideogenApi; channels: Array<{ id: string; n
   const channel = props.channels.find(entry => entry.id === channelId) ?? props.channels[0]
 
   const run = async (enhance: boolean): Promise<void> => {
+    if (props.channels.length === 0) {
+      setError(tt('config.missing'))
+      return
+    }
     if (prompt.trim() === '') {
       setError(tt('prompt.required'))
       return
@@ -126,8 +131,8 @@ function GenerateView(props: { api: VideogenApi; channels: Array<{ id: string; n
       )}
       <input className={css.input} value={negative} onChange={event => setNegative(event.target.value)} placeholder={tt('negative.placeholder')} />
       <div className={css.row}>
-        <button className={css.primary} disabled={busy} onClick={() => { void run(false) }}>{busy ? tt('generating') : tt('generate')}</button>
-        <button className={css.secondary} disabled={busy} onClick={() => { void run(true) }}>{tt('enhance')}</button>
+        <button className={css.primary} disabled={busy || props.channels.length === 0} title={props.channels.length === 0 ? tt('config.missing') : undefined} onClick={() => { void run(false) }}>{busy ? tt('generating') : tt('generate')}</button>
+        <button className={css.secondary} disabled={busy || props.channels.length === 0} title={props.channels.length === 0 ? tt('config.missing') : undefined} onClick={() => { void run(true) }}>{tt('enhance')}</button>
       </div>
       {error !== '' && <div className={css.error}>{error}</div>}
       {result !== undefined && <ResultView result={result} />}
@@ -405,7 +410,7 @@ function StudioView(props: { api: VideogenApi; channels: Array<{ id: string; nam
         <div className={css.shots}>
           <div className={css.shotHeader}>
             <span>{tt('studio.shots')}</span>
-            <button className={css.secondary} disabled={busy} onClick={() => { void generateAll() }}>{tt('studio.generateAll')}</button>
+            <button className={css.secondary} disabled={busy || props.channels.length === 0} title={props.channels.length === 0 ? tt('config.missing') : undefined} onClick={() => { void generateAll() }}>{tt('studio.generateAll')}</button>
             <button className={css.secondary} disabled={busy} onClick={() => { void compose() }}>{tt('studio.compose')}</button>
           </div>
           {selected.shots.map(shot => (
