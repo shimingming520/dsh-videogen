@@ -19,6 +19,7 @@ interface PresetInfo {
   name: string
   apiUrl: string
   description: string
+  custom?: Record<string, unknown>
 }
 
 interface ChannelDraft {
@@ -432,8 +433,9 @@ export function VideoGenSettingsCard(props: { scope: VideogenScope }) {
                               ...(preset !== undefined ? {
                                 apiUrl: preset.apiUrl,
                                 name: channel.name || preset.name,
-                                authMode: 'bearer',
-                                ...(preset.id !== 'custom' && preset.id !== 'ark' ? { customJson: '' } : {}),
+                                ...(preset.id === 'custom'
+                                  ? { customJson: preset.custom !== undefined ? JSON.stringify(preset.custom, null, 2) : channel.customJson }
+                                  : { customJson: '' }),
                               } : {}),
                             })
                           }}>
@@ -446,16 +448,7 @@ export function VideoGenSettingsCard(props: { scope: VideogenScope }) {
                           <input id={`video-channel-url-${channel.id}`} className={css.input} value={channel.apiUrl} placeholder={selectedPreset?.apiUrl ?? tt('channel.apiUrlPlaceholder')} disabled={!canEdit} onChange={event => updateChannel(channel.id, { apiUrl: event.target.value })} />
                           <p className={css.sectionHint}>{tt('channel.apiUrlHint')}</p>
                         </div>
-                        {(channel.preset === 'kling' || channel.preset === 'custom') ? (
-                          <div className={css.field}>
-                            <label className={css.label} htmlFor={`video-channel-auth-${channel.id}`}>{tt('channel.authMode')}</label>
-                            <select id={`video-channel-auth-${channel.id}`} className={css.select} value={channel.authMode} disabled={!canEdit} onChange={event => updateChannel(channel.id, { authMode: event.target.value === 'jwt' ? 'jwt' : 'bearer' })}>
-                              <option value="bearer">{tt('channel.authBearer')}</option>
-                              <option value="jwt">{tt('channel.authJwt')}</option>
-                            </select>
-                          </div>
-                        ) : null}
-                        {(channel.preset === 'custom' || channel.preset === 'ark') ? (
+                        {channel.preset === 'custom' ? (
                           <div className={css.field}>
                             <label className={css.label} htmlFor={`video-channel-spec-${channel.id}`}>{tt('channel.customSpec')}</label>
                             <textarea id={`video-channel-spec-${channel.id}`} className={css.textarea} value={channel.customJson} placeholder="{}" disabled={!canEdit} onChange={event => updateChannel(channel.id, { customJson: event.target.value })} />

@@ -194,7 +194,8 @@ export function klingJwt(accessKey: string, secretKey: string, ttlSeconds = 1800
 function klingAuth(channel: VideoChannel): string {
   const value = channel.apiKey.trim()
   const separator = value.indexOf(':')
-  if (channel.authMode === 'jwt' && separator > 0 && separator < value.length - 1) {
+  // "AccessKey:SecretKey" → JWT signing; anything else is a plain bearer token.
+  if (separator > 0 && separator < value.length - 1) {
     const accessKey = value.slice(0, separator).trim()
     const secretKey = value.slice(separator + 1).trim()
     return `Bearer ${klingJwt(accessKey, secretKey)}`

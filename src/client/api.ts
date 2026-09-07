@@ -47,8 +47,8 @@ export class VideogenApi {
     return { ok: body.ok === true, ...(body.enhanced === undefined ? {} : { enhanced: body.enhanced }), ...(body.code === undefined ? {} : { code: body.code }), ...(body.message === undefined ? {} : { message: body.message }) }
   }
 
-  async presets(): Promise<Array<{ id: string; name: string; apiUrl: string; description: string; aspectRatios?: string[]; durations?: number[] }>> {
-    const body = await json<{ presets: Array<{ id: string; name: string; apiUrl: string; description: string; aspectRatios?: string[]; durations?: number[] }> }>(await fetch(PRESETS_API))
+  async presets(): Promise<Array<{ id: string; name: string; apiUrl: string; description: string; aspectRatios?: string[]; durations?: number[]; custom?: Record<string, unknown> }>> {
+    const body = await json<{ presets: Array<{ id: string; name: string; apiUrl: string; description: string; aspectRatios?: string[]; durations?: number[]; custom?: Record<string, unknown> }> }>(await fetch(PRESETS_API))
     return body.presets
   }
 

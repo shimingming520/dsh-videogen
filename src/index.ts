@@ -231,8 +231,11 @@ export function apply(ctx: Context, config?: Config): void {
           authMode: channel.authMode === 'jwt' ? 'jwt' : 'bearer',
           custom: parseCustomSpec(channel.customJson),
         }
-        if (resolved.preset !== '' && resolved.preset !== 'custom' && resolved.preset !== 'ark') {
-          // Built-in presets ignore customJson unless explicitly filled.
+        if (resolved.preset === 'ark') {
+          // ARK ships a bundled template; user JSON overrides it when provided.
+          resolved.custom = parseCustomSpec(channel.customJson) ?? videoPresetById('ark')?.custom
+        } else if (resolved.preset !== '' && resolved.preset !== 'custom') {
+          // Other built-in presets may override their protocol via JSON when filled.
           resolved.custom = parseCustomSpec(channel.customJson) ?? resolved.custom
         }
         return resolved
