@@ -1,3 +1,33 @@
+/* ---------- center-column takeover (attribute-scoped, like dsh-audiogen) ---------- */
+
+/* The panel container rides inside the conversation grid item as an extra
+   trailing child; hidden unless the panel is active — never overlays the
+   session by default. */
+[data-pane='conversation'],
+[class*='centerCol'] {
+  position: relative;
+}
+
+[data-dsh-videogen-view] {
+  position: absolute;
+  inset: 0;
+  display: none;
+  z-index: 60;
+  background: var(--dsh-bg, #f7f7f8);
+}
+
+/* Single-occupant center column: show only when this panel is active and no
+   sibling panel attribute is set. */
+html[data-dsh-videogen-active]:not([data-dsh-taskboard-active]):not([data-dsh-ssh-active]):not([data-dsh-imagegen-active]):not([data-dsh-audiogen-active]) [data-dsh-videogen-view] {
+  display: block;
+}
+
+/* While the panel is active, hide the conversation content underneath. */
+html[data-dsh-videogen-active]:not([data-dsh-taskboard-active]):not([data-dsh-ssh-active]):not([data-dsh-imagegen-active]):not([data-dsh-audiogen-active]) [data-pane='conversation'] > :not([data-dsh-videogen-view]),
+html[data-dsh-videogen-active]:not([data-dsh-taskboard-active]):not([data-dsh-ssh-active]):not([data-dsh-imagegen-active]):not([data-dsh-audiogen-active]) [class*='centerCol'] > :not([data-dsh-videogen-view]) {
+  visibility: hidden;
+}
+
 .view {
   position: absolute;
   inset: 0;

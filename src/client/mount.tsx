@@ -47,6 +47,8 @@ export function mountPanel(
     container = document.createElement('div')
     container.dataset.dshVideogenView = ''
     container.className = css.view
+    container.hidden = !controller.getSnapshot().panelOpen
+    container.setAttribute('aria-hidden', String(!controller.getSnapshot().panelOpen))
     column.appendChild(container)
     root = createRoot(container)
     root.render(<VideoGenPanel api={api} scope={scope} channelsReady={channelsReady} />)
@@ -56,12 +58,17 @@ export function mountPanel(
   waitObserver.observe(document.body, { childList: true, subtree: true })
 
   const applyActive = (): void => {
-    if (controller.getSnapshot().panelOpen) {
+    const active = controller.getSnapshot().panelOpen
+    if (active) {
       for (const attr of OTHER_ACTIVE_ATTRS) document.documentElement.removeAttribute(attr)
       document.documentElement.setAttribute(ACTIVE_ATTR, '')
       document.dispatchEvent(new CustomEvent(ACTIVATE_EVENT, { detail: PANEL_NAME }))
     } else {
       document.documentElement.removeAttribute(ACTIVE_ATTR)
+    }
+    if (container !== undefined) {
+      container.hidden = !active
+      container.setAttribute('aria-hidden', String(!active))
     }
   }
   const onOtherActivate = (event: Event): void => {

@@ -25,6 +25,9 @@ export function VideoGenPanel(props: PanelProps) {
   const channels = config.value?.channels ?? []
   const haveChannels = channels.length > 0
   const enabled = config.value?.enabled !== false
+  if (config.status === 'loading') {
+    return <div className={css.viewEmpty}>{tt('config.loading')}</div>
+  }
   if (!enabled) {
     return <div className={css.viewEmpty}>{tt('config.disabled')}</div>
   }
