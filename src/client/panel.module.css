@@ -44,6 +44,15 @@ html[data-dsh-videogen-active]:not([data-dsh-taskboard-active]):not([data-dsh-ss
   overflow: hidden;
 }
 
+/* Border-box everywhere in the panel: width:100% + padding on the prompt
+   textarea must not poke past its own column into the neighbouring one. */
+.panel,
+.panel *,
+.panel *::before,
+.panel *::after {
+  box-sizing: border-box;
+}
+
 .banner {
   margin: 8px 12px 0;
   padding: 8px 12px;
@@ -791,6 +800,11 @@ html[data-dsh-videogen-active]:not([data-dsh-taskboard-active]):not([data-dsh-ss
   flex-direction: row;
   align-items: stretch;
   overflow: hidden;
+  /* Query container: column stacking follows the panel's own width (the DSH
+     center column), not the viewport — a wide window with a narrow center
+     column previously squeezed the three zones and let the prompt box
+     overlap the middle zone. */
+  container-type: inline-size;
 }
 
 .configCol {
@@ -1019,8 +1033,34 @@ html[data-dsh-videogen-active]:not([data-dsh-taskboard-active]):not([data-dsh-ss
 }
 
 /* ---------- narrow widths: stack the three zones ---------- */
+/* The primary rule is a container query on the panel width (configCol 300px
+   + historyCol 280px leaves a usable middle only above ~860px); the viewport
+   media query below is a fallback for browsers without container queries. */
 
-@media (max-width: 980px) {
+@container (max-width: 860px) {
+  .generateLayout {
+    flex-direction: column;
+    overflow-y: auto;
+  }
+
+  .configCol,
+  .resultCol,
+  .historyCol {
+    width: auto;
+    flex: none;
+    overflow: visible;
+    border: none;
+    padding: 12px;
+  }
+
+  .resultCol {
+    min-height: 280px;
+    border-top: 1px solid var(--dsw-alias-border-l2, #e2e2e4);
+    border-bottom: 1px solid var(--dsw-alias-border-l2, #e2e2e4);
+  }
+}
+
+@media (max-width: 860px) {
   .generateLayout {
     flex-direction: column;
     overflow-y: auto;

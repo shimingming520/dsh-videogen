@@ -148,4 +148,84 @@ describe('VideoGenSettingsCard', () => {
     expect(ops).toContainEqual({ op: 'unset', path: ['channelSecrets', 'ch-1'] })
     await act(async () => root.unmount())
   })
+
+  it('获取可用模型：候选列表不直接填充，勾选后导入才写入目录', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = String(input)
+      if (url.includes('/llm/models')) {
+        return new Response(JSON.stringify({ models: [] }), { headers: { 'content-type': 'application/json' } })
+      }
+      if (url.includes('/models/discover')) {
+        return new Response(JSON.stringify({
+          models: [
+            { alias: 'kling-v2-1', id: 'kling-v2-1', category: 'video' },
+            { alias: 'sora-2', id: 'sora-2', category: 'video' },
+            { alias: 'gpt-4o', id: 'gpt-4o', category: 'unknown' },
+            { alias: 'music-3.0', id: 'music-3.0', category: 'unknown' },
+          ],
+          source: '测试来源',
+        }), { headers: { 'content-type': 'application/json' } })
+      }
+      return new Response(JSON.stringify({ presets: [] }), { headers: { 'content-type': 'application/json' } })
+    })
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root = createRoot(container)
+    await act(async () => root.render(createElement(VideoGenSettingsCard, { scope: fakeScope() as never })))
+    await act(async () => container.querySelector('button[aria-expanded]')?.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+    await act(async () => [...container.querySelectorAll('button')].find(button => button.textContent === '编辑')?.click())
+
+    // 目录现状：仅 sora-2（id + 别名两个输入框）
+    let rows = [...container.querySelectorAll<HTMLInputElement>('[data-testid="models-editor"] input')].map(input => input.value)
+    expect(rows.filter(value => value === 'sora-2').length).toBe(2)
+
+    // 点击获取可用模型 → 展示候选面板，但不直接写入目录
+    await act(async () => [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === '✨ 获取可用模型')?.click())
+    await act(async () => {})
+
+    expect(container.querySelector('[data-testid="model-candidates"]')).not.toBeNull()
+    expect(container.textContent).toContain('kling-v2-1')
+    expect(container.textContent).toContain('sora-2')
+    expect(container.textContent).toContain('已在目录')
+    // 客户端兜底过滤：非视频模型（gpt-4o / music-3.0）不进入候选列表
+    expect(container.textContent).not.toContain('gpt-4o')
+    expect(container.textContent).not.toContain('music-3.0')
+    rows = [...container.querySelectorAll<HTMLInputElement>('[data-testid="models-editor"] input')].map(input => input.value)
+    expect(rows.filter(value => value === 'kling-v2-1').length).toBe(0)
+
+    // 导入选中（默认选中新模型 kling-v2-1；已存在的 sora-2 自动勾选但不可取消）
+    await act(async () => [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.startsWith('导入选中'))?.click())
+    await act(async () => {})
+
+    expect(container.querySelector('[data-testid="model-candidates"]')).toBeNull()
+    rows = [...container.querySelectorAll<HTMLInputElement>('[data-testid="models-editor"] input')].map(input => input.value)
+    expect(rows.filter(value => value === 'sora-2').length).toBe(2)
+    expect(rows.filter(value => value === 'kling-v2-1').length).toBe(2)
+    await act(async () => root.unmount())
+  })
+
+  it('获取可用模型：发现失败时显示错误且不污染目录', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = String(input)
+      if (url.includes('/llm/models')) return new Response(JSON.stringify({ models: [] }), { headers: { 'content-type': 'application/json' } })
+      if (url.includes('/models/discover')) return new Response(JSON.stringify({ ok: false, message: 'HTTP 401' }), { status: 502, headers: { 'content-type': 'application/json' } })
+      return new Response(JSON.stringify({ presets: [] }), { headers: { 'content-type': 'application/json' } })
+    })
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root = createRoot(container)
+    await act(async () => root.render(createElement(VideoGenSettingsCard, { scope: fakeScope() as never })))
+    await act(async () => container.querySelector('button[aria-expanded]')?.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+    await act(async () => [...container.querySelectorAll('button')].find(button => button.textContent === '编辑')?.click())
+
+    await act(async () => [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === '✨ 获取可用模型')?.click())
+    await act(async () => {})
+
+    expect(container.querySelector('[data-testid="model-candidates"]')).toBeNull()
+    expect(container.textContent).toContain('模型发现失败')
+    // 目录仍未变化：只有原 sora-2 一行（两个输入框）
+    const rows = [...container.querySelectorAll<HTMLInputElement>('[data-testid="models-editor"] input')].map(input => input.value)
+    expect(rows.filter(value => value === 'sora-2').length).toBe(2)
+    await act(async () => root.unmount())
+  })
 })

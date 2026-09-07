@@ -6,7 +6,7 @@
 import {
   ENHANCE_API, GENERATE_API, HISTORY_API, LIBRARY_API, PRESETS_API, PROCESS_API,
   MODEL_API, STUDIO_API,
-  type GenerateVideoRequest, type GenerateResult, type HistoryEntry,
+  type DiscoveredVideoModel, type GenerateVideoRequest, type GenerateResult, type HistoryEntry,
   type LibraryEntry, type ProcessRequest, type ProcessResult, type StoryboardProject,
   type StoryboardTemplate, type VideoChannelConfig,
 } from '../protocol.ts'
@@ -52,8 +52,8 @@ export class VideogenApi {
     return body.presets
   }
 
-  async discoverModels(channelId: string, draft?: { preset?: string; apiUrl?: string; apiKey?: string }): Promise<{ models: Array<{ alias: string; id: string }>; source: string }> {
-    return json<{ models: Array<{ alias: string; id: string }>; source: string }>(await postJson(MODEL_API.discover, {
+  async discoverModels(channelId: string, draft?: { preset?: string; apiUrl?: string; apiKey?: string }): Promise<{ models: DiscoveredVideoModel[]; source: string }> {
+    return json<{ models: DiscoveredVideoModel[]; source: string }>(await postJson(MODEL_API.discover, {
       channelId,
       ...(draft?.preset === undefined ? {} : { preset: draft.preset }),
       ...(draft?.apiUrl === undefined ? {} : { apiUrl: draft.apiUrl }),

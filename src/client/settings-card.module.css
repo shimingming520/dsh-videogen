@@ -623,3 +623,106 @@
   font-size: 13px;
   cursor: pointer;
 }
+
+/* discovered-model candidate picker */
+.discoverSource {
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--dsw-color-success, var(--dsw-alias-label-secondary, #555));
+}
+
+.candidatePanel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid var(--dsw-alias-border-l2, #e2e2e4);
+  border-radius: 10px;
+  background: var(--dsw-alias-bg-layer-3, #fff);
+  padding: 10px 12px;
+}
+
+.candidateHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.candidateTitle {
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: 500;
+  color: var(--dsw-alias-label-secondary, #555);
+}
+
+.candidateList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.candidate {
+  display: flex;
+  align-items: center;
+}
+
+.candidateLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  padding: 4px 2px;
+  color: var(--dsw-alias-label-secondary, #555);
+  font-size: 12px;
+  line-height: 1.5;
+  cursor: pointer;
+}
+
+.candidateLabel input {
+  margin: 0;
+}
+
+.candidateLabel:has(input:disabled) {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.candidateId {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--dsw-font-family-mono, monospace);
+}
+
+.categoryBadge,
+.alreadyBadge {
+  flex: none;
+  border-radius: 999px;
+  padding: 0 7px;
+  font-size: 11px;
+  line-height: 17px;
+  white-space: nowrap;
+}
+
+.categoryBadge {
+  background: var(--dsw-alias-bg-module-platform, #f2f2f4);
+  color: var(--dsw-alias-label-secondary, #555);
+}
+
+.alreadyBadge {
+  background: var(--dsw-alias-bg-module-platform, #f2f2f4);
+  color: var(--dsw-alias-label-tertiary, #888);
+}
+
+.candidateActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}

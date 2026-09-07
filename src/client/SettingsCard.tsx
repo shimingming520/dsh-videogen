@@ -11,7 +11,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { VideogenScope, SettingsOp, VideogenConfig } from './settings-scope.ts'
 import { VideogenApi } from './api.ts'
 import { tt, errorMessage } from './helpers.ts'
-import { LLM_MODELS_API, type LlmModelOption, type ModelMapping } from '../protocol.ts'
+import { LLM_MODELS_API, type DiscoveredVideoModel, type LlmModelOption, type ModelMapping } from '../protocol.ts'
 import css from './settings-card.module.css'
 
 interface PresetInfo {
@@ -79,6 +79,11 @@ export function VideoGenSettingsCard(props: { scope: VideogenScope }) {
   const pendingPresetCallbacks = useRef<Array<(items: PresetInfo[]) => void>>([])
   const editingBaseline = useRef<{ channel?: ChannelDraft; dirty: boolean; defaultId: string } | null>(null)
   const [removedSecretIds, setRemovedSecretIds] = useState<string[]>([])
+  const [discovering, setDiscovering] = useState(false)
+  const [discoverError, setDiscoverError] = useState('')
+  const [candidates, setCandidates] = useState<DiscoveredVideoModel[] | null>(null)
+  const [picked, setPicked] = useState<ReadonlySet<string>>(new Set())
+  const [sourceNote, setSourceNote] = useState<string | null>(null)
 
   const api = useMemo(() => new VideogenApi(), [])
 
@@ -122,6 +127,15 @@ export function VideoGenSettingsCard(props: { scope: VideogenScope }) {
     mountedRef.current = false
     pendingPresetCallbacks.current = []
   }, [])
+
+  // Discovery candidates belong to one editor session: reset whenever the
+  // edited channel changes or the editor closes.
+  useEffect(() => {
+    setCandidates(null)
+    setPicked(new Set())
+    setSourceNote(null)
+    setDiscoverError('')
+  }, [editing])
 
   useEffect(() => {
     if (!open || llmModels !== null || llmModelsError !== '') return
@@ -224,6 +238,81 @@ export function VideoGenSettingsCard(props: { scope: VideogenScope }) {
     editingBaseline.current = null
     setConfirmDeleteId(null)
     dirtyNow()
+  }
+
+  const discover = async (channel: ChannelDraft, stagedKey: string | undefined): Promise<void> => {
+    if (discovering) return
+    setDiscovering(true)
+    setDiscoverError('')
+    setSourceNote(null)
+    try {
+      const result = await api.discoverModels(channel.id, {
+        preset: channel.preset,
+        apiUrl: channel.apiUrl.trim(),
+        ...(stagedKey !== undefined && stagedKey.trim() !== '' ? { apiKey: stagedKey.trim() } : {}),
+      })
+      // 视频生成渠道只展示视频模型：host 已过滤，这里兜底把旧版 host 返回的
+      // 非视频项（category 非 video）也剔除；全部无标记时保留全量避免空列表。
+      const videoModels = result.models.filter(model => model.category === 'video')
+      const found = videoModels.length > 0 ? videoModels : result.models
+      setCandidates(found)
+      setSourceNote(result.source)
+      // 默认选中所有新模型（目录中已存在的自动覆盖选择）。
+      const known = new Set(channel.models.map(model => model.id.trim()).filter(Boolean))
+      setPicked(new Set(found.filter(model => known.has(model.id.trim()) === false).map(model => model.id.trim())))
+    } catch (error) {
+      setDiscoverError(tt('channel.modelsDiscoverFailed', { error: errorMessage(error) }))
+      setCandidates(null)
+      setPicked(new Set())
+    } finally {
+      setDiscovering(false)
+    }
+  }
+
+  const togglePicked = (id: string): void => {
+    setPicked(previous => {
+      const next = new Set(previous)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const toggleAllPicked = (): void => {
+    if (candidates === null) return
+    const channel = channels.find(candidate => candidate.id === editing)
+    const known = new Set((channel?.models ?? []).map(model => model.id.trim()).filter(Boolean))
+    const selectable = candidates.map(candidate => candidate.id.trim()).filter(id => id !== '' && !known.has(id))
+    const allSelected = selectable.length > 0 && selectable.every(id => picked.has(id))
+    setPicked(allSelected ? new Set() : new Set(selectable))
+  }
+
+  const clearCandidates = (): void => {
+    setCandidates(null)
+    setPicked(new Set())
+    setSourceNote(null)
+    setDiscoverError('')
+  }
+
+  const adoptCandidates = (): void => {
+    if (candidates === null) return
+    const channel = channels.find(candidate => candidate.id === editing)
+    if (channel === undefined) {
+      clearCandidates()
+      return
+    }
+    const existing = new Set(channel.models.map(model => model.id.trim()).filter(Boolean))
+    const added: ModelMapping[] = []
+    for (const candidate of candidates) {
+      const id = candidate.id.trim()
+      if (id === '' || !picked.has(id) || existing.has(id)) continue
+      existing.add(id)
+      added.push({ alias: candidate.alias.trim() === '' ? id : candidate.alias.trim(), id })
+    }
+    if (added.length > 0) {
+      updateChannel(channel.id, { models: [...channel.models, ...added] })
+    }
+    clearCandidates()
   }
 
   const commit = async (): Promise<void> => {
@@ -396,6 +485,9 @@ export function VideoGenSettingsCard(props: { scope: VideogenScope }) {
               const stagedKey = channel.keyStaged
               const keyReady = stagedKey === undefined ? hasSecret(channel.id) : stagedKey.trim() !== ''
               const discoverable = canEdit && channel.apiUrl.trim() !== '' && keyReady
+              const knownIds = new Set(channel.models.map(model => model.id.trim()).filter(Boolean))
+              const selectableIds = (candidates ?? []).map(candidate => candidate.id.trim()).filter(id => id !== '' && !knownIds.has(id))
+              const allSelected = selectableIds.length > 0 && selectableIds.every(id => picked.has(id))
               return (
                 <div className={css.editorWrap}>
                   <div className={css.channelEditor}>
@@ -459,20 +551,15 @@ export function VideoGenSettingsCard(props: { scope: VideogenScope }) {
                         ) : null}
                       </div>
                     </details>
-                    <div className={css.modelSection}>
+                      <div className={css.modelSection}>
                       <div className={css.modelHead}>
                         <div>
                           <span className={css.label}>{tt('channel.models')}</span>
                           <span className={css.sectionHint}>{channel.models.length > 0 ? tt('channels.modelCount', { n: channel.models.length }) : tt('channels.noModels')}</span>
                         </div>
-                        <button type="button" className={css.linkButton} disabled={!discoverable} title={discoverable ? undefined : tt('channel.discoverNeedsUrlKey')} onClick={() => {
-                          void api.discoverModels(channel.id, {
-                            preset: channel.preset,
-                            apiUrl: channel.apiUrl.trim(),
-                            ...(stagedKey !== undefined && stagedKey.trim() !== '' ? { apiKey: stagedKey.trim() } : {}),
-                          }).then(result => updateChannel(channel.id, { models: result.models }))
-                            .catch(error => setError(tt('channel.modelsDiscoverFailed', { error: errorMessage(error) })))
-                        }}>{tt('channel.modelsDiscover')}</button>
+                        <button type="button" className={css.linkButton} disabled={!discoverable || discovering} title={discoverable ? undefined : tt('channel.discoverNeedsUrlKey')} onClick={() => { void discover(channel, stagedKey) }}>
+                          {discovering ? tt('channel.discovering') : tt('channel.modelsDiscover')}
+                        </button>
                       </div>
                       <div className={css.modelsRows} data-testid="models-editor">
                         {channel.models.map((model, index) => (
@@ -485,6 +572,43 @@ export function VideoGenSettingsCard(props: { scope: VideogenScope }) {
                         <button type="button" className={css.addModel} disabled={!canEdit} onClick={() => addModelRow(channel.id)}>+ {tt('channel.addModel')}</button>
                       </div>
                       <p className={css.sectionHint}>{tt('channel.modelsHint')}</p>
+                      {sourceNote !== null && candidates !== null ? <p className={css.discoverSource}>{tt('channel.discoverSource', { source: sourceNote })}</p> : null}
+                      {discoverError !== '' ? <p className={css.failed}>{discoverError}</p> : null}
+                      {candidates === null ? null : (
+                        <div className={css.candidatePanel} data-testid="model-candidates">
+                          <div className={css.candidateHead}>
+                            <span className={css.candidateTitle}>{tt('channel.candidates', { n: candidates.length })}</span>
+                            <button type="button" className={css.linkButton} onClick={toggleAllPicked}>
+                              {allSelected ? tt('channel.clearSelection') : tt('channel.selectAll')}
+                            </button>
+                          </div>
+                          <ul className={css.candidateList}>
+                            {candidates.map(candidate => {
+                              const id = candidate.id.trim()
+                              const already = channel.models.some(model => model.id.trim() === id)
+                              return (
+                                <li key={id} className={css.candidate}>
+                                  <label className={css.candidateLabel}>
+                                    <input
+                                      type="checkbox"
+                                      checked={picked.has(id) || already}
+                                      disabled={already || !canEdit}
+                                      onChange={() => togglePicked(id)}
+                                    />
+                                    <span className={css.candidateId}>{candidate.alias === candidate.id ? id : `${candidate.alias}（${candidate.id}）`}</span>
+                                    {candidate.category === 'video' ? <span className={css.categoryBadge}>{tt('channel.category.video')}</span> : null}
+                                    {already ? <span className={css.alreadyBadge}>{tt('channel.inCatalog')}</span> : null}
+                                  </label>
+                                </li>
+                              )
+                            })}
+                          </ul>
+                          <div className={css.candidateActions}>
+                            <button type="button" className={css.discard} onClick={clearCandidates}>{tt('channel.cancel')}</button>
+                            <button type="button" className={css.save} disabled={!canEdit || picked.size === 0} onClick={adoptCandidates}>{tt('channel.adoptSelected', { n: picked.size })}</button>
+                          </div>
+                        </div>
+                      )}
                     </div>
                     <label className={css.defaultField}>
                       <input type="checkbox" checked={defaultId === channel.id} disabled={!canEdit} onChange={event => { if (event.target.checked) { setDefaultId(channel.id); dirtyNow() } }} /> {tt('channel.default')}

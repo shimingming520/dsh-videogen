@@ -42,7 +42,7 @@ export function VideoGenPanel(props: PanelProps) {
         ))}
       </div>
       {!haveChannels && <div className={css.banner}>{tt('config.missing')}</div>}
-      {tab === 'generate' && <GenerateView api={props.api} channels={channels} onOpenLibrary={() => setTab('library')} />}
+      {tab === 'generate' && <GenerateView api={props.api} channels={channels} onOpenLibrary={() => setTab('library')} defaultChannelId={config.value?.defaultChannelId} />}
       {tab === 'process' && <ProcessView api={props.api} />}
       {tab === 'studio' && <StudioView api={props.api} channels={channels} />}
       {tab === 'library' && <LibraryView api={props.api} />}
@@ -71,9 +71,9 @@ interface PanelTask {
  *   middle selected task's videos (result display)
  *   right  in-session history list with per-task management
  */
-function GenerateView(props: { api: VideogenApi; channels: Array<{ id: string; name: string; models: Array<{ alias: string; id: string }> }>; onOpenLibrary: () => void }) {
+function GenerateView(props: { api: VideogenApi; channels: Array<{ id: string; name: string; models: Array<{ alias: string; id: string }> }>; onOpenLibrary: () => void; defaultChannelId?: string }) {
   const [mode, setMode] = useState<'text2video' | 'image2video'>('text2video')
-  const [channelId, setChannelId] = useState(props.channels[0]?.id ?? '')
+  const [channelId, setChannelId] = useState(props.defaultChannelId !== undefined && props.channels.some(entry => entry.id === props.defaultChannelId) ? props.defaultChannelId : props.channels[0]?.id ?? '')
   const [model, setModel] = useState('')
   const [prompt, setPrompt] = useState('')
   const [image, setImage] = useState('')
@@ -222,12 +222,16 @@ function GenerateView(props: { api: VideogenApi; channels: Array<{ id: string; n
             <button className={mode === 'image2video' ? `${css.pill} ${css.pillActive}` : css.pill} onClick={() => setMode('image2video')}>{tt('mode.image2video')}</button>
           </div>
         </div>
-        <div className={css.configBlock}>
-          <div className={css.configLabel}>{tt('gen.channel')}</div>
-          <select className={css.select} value={channelId} onChange={event => setChannelId(event.target.value)}>
-            {props.channels.map(entry => <option key={entry.id} value={entry.id}>{entry.name}</option>)}
-          </select>
-        </div>
+        {/* channel picker only when more than one channel exists — with a
+            single channel the model list is unambiguous, keep the form lean. */}
+        {props.channels.length > 1 && (
+          <div className={css.configBlock}>
+            <div className={css.configLabel}>{tt('gen.channel')}</div>
+            <select className={css.select} value={channelId} onChange={event => setChannelId(event.target.value)}>
+              {props.channels.map(entry => <option key={entry.id} value={entry.id}>{entry.name}</option>)}
+            </select>
+          </div>
+        )}
         <div className={css.configBlock}>
           <div className={css.configLabel}>{tt('gen.model')}</div>
           <select className={css.select} value={model} onChange={event => setModel(event.target.value)}>
