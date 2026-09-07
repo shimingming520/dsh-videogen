@@ -52,8 +52,13 @@ export class VideogenApi {
     return body.presets
   }
 
-  async discoverModels(channelId: string): Promise<{ models: Array<{ alias: string; id: string }>; source: string }> {
-    return json<{ models: Array<{ alias: string; id: string }>; source: string }>(await postJson(MODEL_API.discover, { channelId }))
+  async discoverModels(channelId: string, draft?: { preset?: string; apiUrl?: string; apiKey?: string }): Promise<{ models: Array<{ alias: string; id: string }>; source: string }> {
+    return json<{ models: Array<{ alias: string; id: string }>; source: string }>(await postJson(MODEL_API.discover, {
+      channelId,
+      ...(draft?.preset === undefined ? {} : { preset: draft.preset }),
+      ...(draft?.apiUrl === undefined ? {} : { apiUrl: draft.apiUrl }),
+      ...(draft?.apiKey === undefined ? {} : { apiKey: draft.apiKey }),
+    }))
   }
 
   /** Upload a browser file (name + base64) for local processing. */

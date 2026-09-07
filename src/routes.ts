@@ -112,10 +112,19 @@ export function makeRoutes(deps: VideogenRoutesDeps): WebRoute[] {
           writeJson(res, 400, failureOf(new Error('缺少 channelId')))
           return
         }
-        const channel = channelsView().channels.find(entry => entry.id === body.channelId)
-        if (channel === undefined) {
-          writeJson(res, 404, failureOf(new Error('找不到渠道')))
-          return
+        // Discovery must work from an unsaved draft too: when the channel is not
+        // (yet) in the persisted view, build it from the editor's own fields
+        // (preset/apiUrl/key). Persisted values fill the gaps.
+        const stored = channelsView().channels.find(entry => entry.id === body.channelId)
+        const channel: VideoChannel = {
+          id: stored?.id ?? body.channelId,
+          preset: typeof body.preset === 'string' && body.preset.trim() !== '' ? body.preset.trim() : (stored?.preset ?? ''),
+          name: stored?.name ?? '',
+          apiUrl: typeof body.apiUrl === 'string' && body.apiUrl.trim() !== '' ? body.apiUrl.trim() : (stored?.apiUrl ?? ''),
+          apiKey: typeof body.apiKey === 'string' && body.apiKey.trim() !== '' ? body.apiKey.trim() : (stored?.apiKey ?? ''),
+          models: stored?.models ?? [],
+          authMode: stored?.authMode ?? 'bearer',
+          custom: stored?.custom,
         }
         try {
           writeJson(res, 200, await discoverVideoModels(channel))

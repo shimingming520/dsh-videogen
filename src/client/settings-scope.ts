@@ -52,9 +52,32 @@ function createBridgeApi(fetchFn: typeof fetch): {
   const get = async (path: string): Promise<{ result: BridgeEnvelope }> => {
     try {
       const response = await fetchFn(path, { headers: { accept: 'application/json' } })
-      const body = (await response.json()) as { ns?: string; value?: unknown; revision?: number; writable?: boolean; ok?: boolean; code?: string; message?: string }
+      const body = (await response.json()) as {
+        ns?: string
+        value?: unknown
+        base?: unknown
+        user?: unknown
+        revision?: number
+        secrets?: Array<{ path: string[]; set: boolean }>
+        writable?: boolean
+        ok?: boolean
+        code?: string
+        message?: string
+      }
       if ('ns' in body && body.ns === 'dsh-videogen') {
-        return { result: { ok: true, value: { ns: 'dsh-videogen', value: body.value ?? {}, revision: Number(body.revision ?? 0), writable: true } } }
+        // The bridge answers a *single* namespace view ({ ns, value, base?,
+        // user?, secrets?, revision }); surface it through the same
+        // { namespaces: [...], writable } envelope reload() consumes, so the
+        // value and secret-set sidecar actually reach the snapshot.
+        const view: BridgeView = {
+          ns: body.ns,
+          value: body.value ?? {},
+          ...(body.base === undefined ? {} : { base: body.base }),
+          ...(body.user === undefined ? {} : { user: body.user }),
+          revision: Number(body.revision ?? 0),
+          ...(body.secrets === undefined ? {} : { secrets: body.secrets }),
+        }
+        return { result: { ok: true, value: { namespaces: [view], writable: body.writable !== false } } }
       }
       return { result: { ok: false, code: body.code ?? 'bridge-error', message: body.message ?? 'settings bridge failed' } }
     } catch (error) {

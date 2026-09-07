@@ -393,7 +393,9 @@ export function VideoGenSettingsCard(props: { scope: VideogenScope }) {
               const channel = channels.find(item => item.id === editing)
               if (channel === undefined) return null
               const selectedPreset = presets.find(preset => preset.id === channel.preset)
-              const persisted = config?.channels?.some(item => item.id === channel.id) === true
+              const stagedKey = channel.keyStaged
+              const keyReady = stagedKey === undefined ? hasSecret(channel.id) : stagedKey.trim() !== ''
+              const discoverable = canEdit && channel.apiUrl.trim() !== '' && keyReady
               return (
                 <div className={css.editorWrap}>
                   <div className={css.channelEditor}>
@@ -463,7 +465,14 @@ export function VideoGenSettingsCard(props: { scope: VideogenScope }) {
                           <span className={css.label}>{tt('channel.models')}</span>
                           <span className={css.sectionHint}>{channel.models.length > 0 ? tt('channels.modelCount', { n: channel.models.length }) : tt('channels.noModels')}</span>
                         </div>
-                        <button type="button" className={css.linkButton} disabled={!canEdit || !persisted} title={persisted ? undefined : tt('channel.discoverNeedsSave')} onClick={() => { void api.discoverModels(channel.id).then(result => updateChannel(channel.id, { models: result.models })).catch(error => setError(tt('channel.modelsDiscoverFailed', { error: errorMessage(error) }))) }}>{tt('channel.modelsDiscover')}</button>
+                        <button type="button" className={css.linkButton} disabled={!discoverable} title={discoverable ? undefined : tt('channel.discoverNeedsUrlKey')} onClick={() => {
+                          void api.discoverModels(channel.id, {
+                            preset: channel.preset,
+                            apiUrl: channel.apiUrl.trim(),
+                            ...(stagedKey !== undefined && stagedKey.trim() !== '' ? { apiKey: stagedKey.trim() } : {}),
+                          }).then(result => updateChannel(channel.id, { models: result.models }))
+                            .catch(error => setError(tt('channel.modelsDiscoverFailed', { error: errorMessage(error) })))
+                        }}>{tt('channel.modelsDiscover')}</button>
                       </div>
                       <div className={css.modelsRows} data-testid="models-editor">
                         {channel.models.map((model, index) => (

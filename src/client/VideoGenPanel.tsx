@@ -42,7 +42,7 @@ export function VideoGenPanel(props: PanelProps) {
         ))}
       </div>
       {!haveChannels && <div className={css.banner}>{tt('config.missing')}</div>}
-      {tab === 'generate' && <GenerateView api={props.api} channels={channels} />}
+      {tab === 'generate' && <GenerateView api={props.api} channels={channels} onOpenLibrary={() => setTab('library')} />}
       {tab === 'process' && <ProcessView api={props.api} />}
       {tab === 'studio' && <StudioView api={props.api} channels={channels} />}
       {tab === 'library' && <LibraryView api={props.api} />}
@@ -62,9 +62,16 @@ interface PanelTask {
   videos: GeneratedVideo[]
   error?: string
   model?: string
+  mode?: 'text2video' | 'image2video'
 }
 
-function GenerateView(props: { api: VideogenApi; channels: Array<{ id: string; name: string; models: Array<{ alias: string; id: string }> }> }) {
+/**
+ * Generate view — three zones side by side:
+ *   left   config / mode / channel / model / prompt (submit form)
+ *   middle selected task's videos (result display)
+ *   right  in-session history list with per-task management
+ */
+function GenerateView(props: { api: VideogenApi; channels: Array<{ id: string; name: string; models: Array<{ alias: string; id: string }> }>; onOpenLibrary: () => void }) {
   const [mode, setMode] = useState<'text2video' | 'image2video'>('text2video')
   const [channelId, setChannelId] = useState(props.channels[0]?.id ?? '')
   const [model, setModel] = useState('')
@@ -78,9 +85,17 @@ function GenerateView(props: { api: VideogenApi; channels: Array<{ id: string; n
   const [compare, setCompare] = useState(false)
   const [compareModels, setCompareModels] = useState<string[]>([])
   const [submitting, setSubmitting] = useState(false)
+  const [copied, setCopied] = useState(false)
   const [tasks, setTasks] = useState<PanelTask[]>([])
+  const [selectedId, setSelectedId] = useState<string | undefined>(undefined)
   const [error, setError] = useState('')
   const channel = props.channels.find(entry => entry.id === channelId) ?? props.channels[0]
+
+  // Keep the middle result view on a valid task: follow the newest entry
+  // whenever the current selection disappears (deleted / cleared).
+  useEffect(() => {
+    setSelectedId(prev => (prev !== undefined && tasks.some(task => task.taskId === prev)) ? prev : tasks[0]?.taskId)
+  }, [tasks])
 
   // Poll every pending task (submit was wait:false → we drive progress here).
   useEffect(() => {
@@ -139,15 +154,19 @@ function GenerateView(props: { api: VideogenApi; channels: Array<{ id: string; n
         })
         return { result, model: target }
       }))
-      setTasks(prev => [...out.map(({ result, model }) => ({
+      const createdAt = Date.now()
+      const newItems: PanelTask[] = out.map(({ result, model }) => ({
         taskId: result.taskId ?? '',
         prompt: prompt.trim(),
-        createdAt: Date.now(),
+        createdAt,
         status: result.status,
         videos: result.videos ?? [],
+        mode,
         model,
         ...(result.error !== undefined ? { error: result.error } : {}),
-      })).reverse(), ...prev].slice(0, 20))
+      }))
+      setTasks(prev => [...newItems, ...prev].slice(0, 20))
+      if (newItems.length > 0) setSelectedId(newItems[0]!.taskId)
     } catch (err) {
       setError(errorMessage(err))
     } finally {
@@ -169,94 +188,201 @@ function GenerateView(props: { api: VideogenApi; channels: Array<{ id: string; n
     }
   }
 
-  const forgetTask = (taskId: string): void => {
+  const removeTask = (taskId: string): void => {
     setTasks(prev => prev.filter(task => task.taskId !== taskId))
   }
 
+  const clearHistory = (): void => {
+    setTasks([])
+  }
+
+  const copyPrompt = async (text: string): Promise<void> => {
+    try {
+      if (navigator.clipboard !== undefined) {
+        await navigator.clipboard.writeText(text)
+        setCopied(true)
+        setTimeout(() => setCopied(false), 1500)
+      }
+    } catch {
+      /* clipboard unavailable */
+    }
+  }
+
+  const selected = tasks.find(task => task.taskId === selectedId)
+
   return (
-    <div className={css.section}>
-      <div className={css.row}>
-        <button className={mode === 'text2video' ? `${css.pill} ${css.pillActive}` : css.pill} onClick={() => setMode('text2video')}>{tt('mode.text2video')}</button>
-        <button className={mode === 'image2video' ? `${css.pill} ${css.pillActive}` : css.pill} onClick={() => setMode('image2video')}>{tt('mode.image2video')}</button>
-      </div>
-      <select className={css.select} value={channelId} onChange={event => setChannelId(event.target.value)}>
-        {props.channels.map(entry => <option key={entry.id} value={entry.id}>{entry.name}</option>)}
-      </select>
-      <select className={css.select} value={model} onChange={event => setModel(event.target.value)}>
-        <option value="">{tt('model.label')}</option>
-        {(channel?.models ?? []).map(entry => <option key={entry.id} value={entry.alias}>{entry.alias}</option>)}
-      </select>
-      {mode === 'image2video' && (
-        <input className={css.input} value={image} onChange={event => setImage(event.target.value)} placeholder={tt('image.placeholder')} />
-      )}
-      <textarea className={css.textarea} value={prompt} onChange={event => setPrompt(event.target.value)} placeholder={tt('prompt.placeholder')} />
-      <div className={css.row}>
-        <button className={css.primary} disabled={submitting || props.channels.length === 0} title={props.channels.length === 0 ? tt('config.missing') : undefined} onClick={() => { void submit() }}>{submitting ? tt('process.uploading') : tt('generate')}</button>
-        <button className={css.secondary} disabled={props.channels.length === 0} title={props.channels.length === 0 ? tt('config.missing') : undefined} onClick={() => { void enhance() }}>{tt('enhance')}</button>
-        <button className={css.secondary} onClick={() => setAdvanced(prev => !prev)}>{advanced ? tt('advanced.hide') : tt('advanced.show')}</button>
-        <button className={compare ? `${css.secondary} ${css.compareActive}` : css.secondary} onClick={() => {
-          setCompare(prev => !prev)
-          if (!compare) setCompareModels(prev => prev.length > 0 ? prev : [channel?.models[0]?.alias ?? ''].filter(value => value !== ''))
-        }}>{tt('compare.label')}</button>
-      </div>
-      {compare && (
-        <div className={css.compareBox}>
-          {(channel?.models ?? []).map(entry => (
-            <label key={entry.id} className={css.compareItem}>
-              <input type="checkbox" checked={compareModels.includes(entry.alias)} onChange={event => {
-                setCompareModels(prev => event.target.checked ? [...prev, entry.alias] : prev.filter(value => value !== entry.alias))
-              }} />
-              <span>{entry.alias}</span>
-            </label>
-          ))}
-          {(channel?.models ?? []).length === 0 && <span className={css.hintLine}>{tt('compare.noModels')}</span>}
-        </div>
-      )}
-      {advanced && (
-        <div className={css.advancedBox}>
+    <div className={css.generateLayout} data-testid="generate-layout">
+      {/* ---------------- left: generation config ---------------- */}
+      <div className={css.configCol} data-testid="generate-config">
+        <div className={css.colTitle}>{tt('gen.configTitle')}</div>
+        <div className={css.configBlock}>
+          <div className={css.configLabel}>{tt('gen.mode')}</div>
           <div className={css.row}>
-            <select className={css.select} value={aspect} onChange={event => setAspect(event.target.value)}>
-              <option value="16:9">16:9</option><option value="9:16">9:16</option><option value="1:1">1:1</option><option value="4:3">4:3</option>
-            </select>
-            <input className={css.smallInput} value={duration} onChange={event => setDuration(event.target.value.replace(/[^\d.]/g, ''))} placeholder={tt('duration.label')} />
-            <input className={css.smallInput} value={resolution} onChange={event => setResolution(event.target.value)} placeholder={tt('resolution.label')} />
+            <button className={mode === 'text2video' ? `${css.pill} ${css.pillActive}` : css.pill} onClick={() => setMode('text2video')}>{tt('mode.text2video')}</button>
+            <button className={mode === 'image2video' ? `${css.pill} ${css.pillActive}` : css.pill} onClick={() => setMode('image2video')}>{tt('mode.image2video')}</button>
           </div>
-          <input className={css.input} value={negative} onChange={event => setNegative(event.target.value)} placeholder={tt('negative.placeholder')} />
         </div>
-      )}
-      {error !== '' && <div className={css.error}>{error}</div>}
-      {tasks.length > 0 && (
-        <div className={css.taskList} data-testid="generate-tasks">
-          <div className={css.sectionTitle}>{tt('results.title', { count: tasks.length })}</div>
-          {tasks.map(task => (
-            <div key={task.taskId + task.prompt} className={css.taskCard}>
-              <div className={css.taskHeader}>
-                <span className={task.status === 'completed' ? css.badgeReady : task.status === 'failed' ? css.badgeFailed : css.badgeProcessing}>{tt(`task.state.${task.status}` as never)}</span>
-                <span className={css.taskPrompt}>{task.model !== undefined && task.model !== '' ? `[${task.model}] ` : ''}{task.prompt.slice(0, 60)}{task.prompt.length > 60 ? '…' : ''}</span>
-                <button className={css.linkButton} onClick={() => forgetTask(task.taskId)}>{tt('channels.delete')}</button>
-              </div>
-              {task.status === 'completed' && <VideoGrid videos={task.videos} />}
-              {task.status === 'failed' && <div className={css.error}>{task.error ?? tt('task.state.failed')}</div>}
-              {task.status !== 'completed' && task.status !== 'failed' && (
-                <div className={css.processingRow}><span className={css.spinner} />{tt('generating')}</div>
-              )}
+        <div className={css.configBlock}>
+          <div className={css.configLabel}>{tt('gen.channel')}</div>
+          <select className={css.select} value={channelId} onChange={event => setChannelId(event.target.value)}>
+            {props.channels.map(entry => <option key={entry.id} value={entry.id}>{entry.name}</option>)}
+          </select>
+        </div>
+        <div className={css.configBlock}>
+          <div className={css.configLabel}>{tt('gen.model')}</div>
+          <select className={css.select} value={model} onChange={event => setModel(event.target.value)}>
+            <option value="">{tt('model.label')}</option>
+            {(channel?.models ?? []).map(entry => <option key={entry.id} value={entry.alias}>{entry.alias}</option>)}
+          </select>
+        </div>
+        {mode === 'image2video' && (
+          <div className={css.configBlock}>
+            <div className={css.configLabel}>{tt('gen.image')}</div>
+            <input className={css.input} value={image} onChange={event => setImage(event.target.value)} placeholder={tt('image.placeholder')} />
+          </div>
+        )}
+        <div className={css.configBlock}>
+          <div className={css.configLabel}>{tt('gen.prompt')}</div>
+          <textarea className={`${css.textarea} ${css.promptTextarea}`} value={prompt} onChange={event => setPrompt(event.target.value)} placeholder={tt('prompt.placeholder')} />
+        </div>
+        {advanced && (
+          <div className={css.advancedBox}>
+            <div className={css.row}>
+              <select className={css.select} value={aspect} onChange={event => setAspect(event.target.value)}>
+                <option value="16:9">16:9</option><option value="9:16">9:16</option><option value="1:1">1:1</option><option value="4:3">4:3</option>
+              </select>
+              <input className={css.smallInput} value={duration} onChange={event => setDuration(event.target.value.replace(/[^\d.]/g, ''))} placeholder={tt('duration.label')} />
+              <input className={css.smallInput} value={resolution} onChange={event => setResolution(event.target.value)} placeholder={tt('resolution.label')} />
             </div>
-          ))}
+            <input className={css.input} value={negative} onChange={event => setNegative(event.target.value)} placeholder={tt('negative.placeholder')} />
+          </div>
+        )}
+        {compare && (
+          <div className={css.compareBox}>
+            {(channel?.models ?? []).map(entry => (
+              <label key={entry.id} className={css.compareItem}>
+                <input type="checkbox" checked={compareModels.includes(entry.alias)} onChange={event => {
+                  setCompareModels(prev => event.target.checked ? [...prev, entry.alias] : prev.filter(value => value !== entry.alias))
+                }} />
+                <span>{entry.alias}</span>
+              </label>
+            ))}
+            {(channel?.models ?? []).length === 0 && <span className={css.hintLine}>{tt('compare.noModels')}</span>}
+          </div>
+        )}
+        <button className={`${css.primary} ${css.fullWidth}`} disabled={submitting || props.channels.length === 0} title={props.channels.length === 0 ? tt('config.missing') : undefined} onClick={() => { void submit() }}>
+          {submitting ? tt('gen.submitting') : tt('generate')}
+        </button>
+        <div className={css.row}>
+          <button className={css.secondary} disabled={props.channels.length === 0} title={props.channels.length === 0 ? tt('config.missing') : undefined} onClick={() => { void enhance() }}>{tt('enhance')}</button>
+          <button className={css.secondary} onClick={() => setAdvanced(prev => !prev)}>{advanced ? tt('advanced.hide') : tt('advanced.show')}</button>
+          <button className={compare ? `${css.secondary} ${css.compareActive}` : css.secondary} onClick={() => {
+            setCompare(prev => !prev)
+            if (!compare) setCompareModels(prev => prev.length > 0 ? prev : [channel?.models[0]?.alias ?? ''].filter(value => value !== ''))
+          }}>{tt('compare.label')}</button>
         </div>
-      )}
+        {error !== '' && <div className={css.error}>{error}</div>}
+      </div>
+
+      {/* ---------------- middle: result display ---------------- */}
+      <div className={css.resultCol} data-testid="generate-result">
+        <div className={css.colTitle}>{tt('gen.resultTitle')}</div>
+        {selected === undefined || selected.taskId === '' ? (
+          <div className={css.emptyResult}>{tt('gen.selectHint')}</div>
+        ) : (
+          <>
+            <div className={css.midHeader}>
+              <span className={statusBadgeClass(selected.status)}>{tt(`task.state.${selected.status}` as never)}</span>
+              {selected.model !== undefined && selected.model !== '' && <span className={css.modelTag}>{selected.model}</span>}
+              {selected.mode !== undefined && <span className={css.quietTag}>{tt(`mode.${selected.mode}` as never)}</span>}
+              <span className={css.midTime}>{relativeTime(selected.createdAt)}</span>
+            </div>
+            <div className={css.midPrompt}>
+              <span className={css.midPromptText}>{selected.prompt}</span>
+              <button className={css.linkButton} onClick={() => { void copyPrompt(selected.prompt) }}>{copied ? tt('gen.copied') : tt('gen.copy')}</button>
+            </div>
+            {selected.status === 'completed' && (selected.videos.length > 0
+              ? <ResultVideos videos={selected.videos} />
+              : <div className={css.info}>{tt('gen.noVideo')}</div>)}
+            {selected.status === 'failed' && <div className={css.error}>{selected.error ?? tt('task.state.failed')}</div>}
+            {selected.status !== 'completed' && selected.status !== 'failed' && (
+              <div className={css.pendingResult}>
+                <div className={css.processingRow}><span className={css.spinner} />{tt('generating')}</div>
+                {selected.taskId !== '' && <div className={css.mono}>{selected.taskId}</div>}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
+      {/* ---------------- right: history & management ---------------- */}
+      <div className={css.historyCol} data-testid="generate-history">
+        <div className={css.colTitle}>
+          <span>{tt('gen.historyTitle')}</span>
+          <span className={css.countBadge}>{tasks.length}</span>
+          <span className={css.colTitleSpacer} />
+          <button className={css.linkButton} onClick={() => { props.onOpenLibrary() }}>{tt('gen.openLibrary')}</button>
+          {tasks.length > 0 && <button className={css.linkButton} onClick={clearHistory}>{tt('gen.clearHistory')}</button>}
+        </div>
+        {tasks.length === 0 && <div className={css.info}>{tt('gen.historyEmpty')}</div>}
+        {tasks.map(task => (
+          <div
+            key={task.taskId + task.prompt}
+            role="button"
+            tabIndex={0}
+            className={task.taskId === selectedId ? `${css.historyItem} ${css.historyItemActive}` : css.historyItem}
+            onClick={() => setSelectedId(task.taskId)}
+            onKeyDown={event => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault()
+                setSelectedId(task.taskId)
+              }
+            }}
+          >
+            <div className={css.historyMeta}>
+              <span className={statusBadgeClass(task.status)}>{tt(`task.state.${task.status}` as never)}</span>
+              {task.model !== undefined && task.model !== '' && <span className={css.modelTag}>{task.model}</span>}
+              <span className={css.historyTime}>{relativeTime(task.createdAt)}</span>
+            </div>
+            <div className={css.historyPrompt}>{task.prompt}</div>
+            <div className={css.historyOps} onClick={event => event.stopPropagation()}>
+              <button className={css.linkButton} onClick={() => setSelectedId(task.taskId)}>{tt('gen.view')}</button>
+              {task.status === 'completed' && task.videos.length > 0 && (
+                <a className={css.linkButton} href={task.videos[0]!.url} download>{tt('download')}</a>
+              )}
+              <button className={css.linkButton} onClick={() => removeTask(task.taskId)}>{tt('channels.delete')}</button>
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
 
-function VideoGrid({ videos }: { videos: GeneratedVideo[] }) {
-  if (videos.length === 0) return null
+function statusBadgeClass(status: string): string {
+  if (status === 'completed') return css.badgeReady
+  if (status === 'failed') return css.badgeFailed
+  return css.badgeProcessing
+}
+
+function relativeTime(ts: number): string {
+  const minutes = Math.floor((Date.now() - ts) / 60000)
+  if (minutes < 1) return tt('gen.time.justNow')
+  if (minutes < 60) return tt('gen.time.minutesAgo', { n: minutes })
+  return tt('gen.time.hoursAgo', { n: Math.floor(minutes / 60) })
+}
+
+function ResultVideos({ videos }: { videos: GeneratedVideo[] }) {
   return (
-    <div className={css.videoGrid}>
+    <div className={css.resultGrid}>
       {videos.map((video, index) => (
         <div key={index + video.url} className={css.videoCard}>
           {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-          <video className={css.video} src={video.url} controls preload="metadata" />
-          <a className={css.link} href={video.url} download>{tt('download')}</a>
+          <video className={`${css.video} ${css.resultVideo}`} src={video.url} controls preload="metadata" />
+          <div className={css.videoOps}>
+            <a className={css.link} href={video.url} download>{tt('download')}</a>
+            {video.remoteUrl !== undefined && <a className={css.link} href={video.remoteUrl} target="_blank" rel="noreferrer">{tt('gen.remote')}</a>}
+          </div>
         </div>
       ))}
     </div>
