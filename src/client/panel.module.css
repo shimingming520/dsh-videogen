@@ -14,6 +14,10 @@
   display: none;
   z-index: 60;
   background: var(--dsw-alias-bg-base, #f7f7f8);
+  /* Query container for the generate three-zone layout: the panel width
+     equals the host center column, which is narrower than the viewport in
+     a wide window — stacking must follow the panel, not the viewport. */
+  container-type: inline-size;
 }
 
 /* Single-occupant center column: show only when this panel is active and no
@@ -800,11 +804,9 @@ html[data-dsh-videogen-active]:not([data-dsh-taskboard-active]):not([data-dsh-ss
   flex-direction: row;
   align-items: stretch;
   overflow: hidden;
-  /* Query container: column stacking follows the panel's own width (the DSH
-     center column), not the viewport — a wide window with a narrow center
-     column previously squeezed the three zones and let the prompt box
-     overlap the middle zone. */
-  container-type: inline-size;
+  /* The column-stacking breakpoint is a container query on the panel view
+     (see [data-dsh-videogen-view]): container-type must live on a block
+     ancestor, not on this flex item. */
 }
 
 .configCol {
