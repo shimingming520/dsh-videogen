@@ -1,7 +1,7 @@
 {
   "name": "dsh-videogen",
   "description": "AI video plugin for the dsh web GUI: multi-vendor video generation channels (OpenAI-compatible /v1/videos, Kling, MiniMax Hailuo, Volcengine ARK, custom generic async), FFmpeg video processing (probe / frame extraction / GIF / image compress), a lightweight storyboard studio (templates + shots + FFmpeg compose), Agent tools and a sidebar AI 视频 panel.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
